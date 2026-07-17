@@ -1,0 +1,34 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background: #f5f5f5; color: #333; }
+
+.tab-bar { display: flex; background: #fff; border-bottom: 2px solid #e0e0e0; padding: 0 20px; position: sticky; top: 0; z-index: 100; }
+.tab-bar button { padding: 12px 24px; border: none; background: transparent; cursor: pointer; font-size: 15px; color: #666; border-bottom: 3px solid transparent; transition: all 0.2s; }
+.tab-bar button:hover { color: #333; }
+.tab-bar button.active { color: #1a73e8; border-bottom-color: #1a73e8; font-weight: bold; }
+
+.tab-content { max-width: 1000px; margin: 20px auto; padding: 0 20px; }
+.card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.card h3 { margin-bottom: 12px; font-size: 16px; color: #444; }
+
+.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-bottom: 12px; }
+input, textarea, select { width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; font-family: inherit; }
+textarea { resize: vertical; }
+
+.btn-primary { background: #1a73e8; color: #fff; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; }
+.btn-primary:hover { background: #1557b0; }
+.btn-primary:disabled { background: #93b8ed; cursor: not-allowed; }
+.btn-secondary { background: #f0f0f0; color: #333; border: 1px solid #ddd; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; }
+.btn-large { padding: 12px 32px; font-size: 16px; }
+.btn-small { padding: 4px 12px; font-size: 12px; border-radius: 3px; border: 1px solid #ddd; background: #fff; cursor: pointer; margin-left: 4px; }
+.btn-danger { color: #d93025; border-color: #d93025; }
+
+.item-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
+.row { display: flex; gap: 12px; align-items: center; margin: 12px 0; }
+
+.resume-iframe { width: 100%; height: 800px; border: 1px solid #ddd; border-radius: 4px; }
+.cover-letter { white-space: pre-wrap; line-height: 1.8; background: #fafafa; padding: 16px; border-radius: 4px; }
+.toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+.hint { color: #999; font-size: 13px; }
+small { color: #999; }
+
+@media print { .tab-bar, .toolbar, .btn-primary, .btn-secondary, .btn-small { display: none !important; } }

@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI简历定制工具</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+</head>
+<body>
+<div id="app">
+    <nav class="tab-bar">
+        <button v-for="tab in tabs" :key="tab.id"
+                :class="{active: currentTab === tab.id}"
+                @click="currentTab = tab.id">{{ tab.label }}</button>
+    </nav>
+
+    <!-- 经历管理 -->
+    <section v-show="currentTab === 'experience'" class="tab-content">
+        <h2>经历管理</h2>
+        <div class="card">
+            <h3>基本信息</h3>
+            <div class="form-grid">
+                <input v-model="basicInfo.name" placeholder="姓名">
+                <input v-model="basicInfo.phone" placeholder="电话">
+                <input v-model="basicInfo.email" placeholder="邮箱">
+                <input v-model="basicInfo.age" placeholder="年龄">
+                <input v-model="basicInfo.job_target" placeholder="求职意向">
+            </div>
+            <button @click="saveBasicInfo" class="btn-primary">保存基本信息</button>
+        </div>
+
+        <div v-for="mod in modules" :key="mod.key" class="card">
+            <h3>{{ mod.label }}</h3>
+            <div v-for="(item, idx) in mod.items" :key="idx" class="item-row">
+                <span>{{ formatItem(item) }}</span>
+                <div>
+                    <button @click="editItem(mod.key, item)" class="btn-small">编辑</button>
+                    <button @click="deleteItem(mod.key, item.id)" class="btn-small btn-danger">删除</button>
+                </div>
+            </div>
+            <button @click="addItem(mod.key)" class="btn-primary">+ 添加{{ mod.label }}</button>
+        </div>
+
+        <div class="card">
+            <h3>自我评价</h3>
+            <textarea v-model="selfEval.content" rows="4" placeholder="自我评价..."></textarea>
+            <button @click="saveSelfEval" class="btn-primary">保存自我评价</button>
+        </div>
+
+        <div class="card">
+            <h3>AI 智能导入</h3>
+            <textarea v-model="pasteText" rows="6" placeholder="粘贴你的经历文本，AI 将自动识别并结构化..."></textarea>
+            <button @click="parseText" class="btn-primary" :disabled="parsing">
+                {{ parsing ? '解析中...' : 'AI 解析导入' }}
+            </button>
+        </div>
+    </section>
+
+    <!-- 简历生成 -->
+    <section v-show="currentTab === 'generate'" class="tab-content">
+        <h2>简历生成</h2>
+        <div class="card">
+            <h3>输入招聘信息</h3>
+            <textarea v-model="jdText" rows="8" placeholder="粘贴招聘JD..."></textarea>
+            <div class="row">
+                <select v-model="templateType">
+                    <option value="default">默认模板（项目优先）</option>
+                    <option value="education">教育背景前置</option>
+                    <option v-for="t in customTemplates" :key="t.id" :value="t.id">{{ t.name }}</option>
+                </select>
+                <button @click="generateResume" class="btn-primary btn-large" :disabled="generating">
+                    {{ generating ? 'AI 生成中...' : '生成简历' }}
+                </button>
+            </div>
+            <div class="row">
+                <input type="file" multiple accept="image/*" @change="handleOCRUpload" style="display:none" ref="ocrInput">
+                <button @click="$refs.ocrInput.click()" class="btn-secondary">上传截图识别JD</button>
+            </div>
+            <div v-if="ocrText" class="ocr-result card">
+                <h4>OCR识别结果（可编辑后使用）：</h4>
+                <textarea v-model="ocrText" rows="6"></textarea>
+                <button @click="jdText = ocrText; ocrText = ''" class="btn-primary">使用此文本</button>
+            </div>
+        </div>
+
+        <div v-if="result" class="results">
+            <div v-if="result.company_analysis && result.company_analysis.verdict" class="card">
+                <h3>公司分析</h3>
+                <p><strong>风险等级：</strong>{{ result.company_analysis.risk_level }}</p>
+                <p><strong>结论：</strong>{{ result.company_analysis.verdict }}</p>
+                <p v-if="result.company_analysis.advice">{{ result.company_analysis.advice }}</p>
+            </div>
+            <div v-if="result.jd_analysis" class="card">
+                <h3>JD分析</h3>
+                <p>岗位：{{ result.jd_analysis.job_title }}</p>
+                <p>硬性要求：{{ (result.jd_analysis.hard_requirements || []).join('、') }}</p>
+            </div>
+            <div v-if="result.diagnosis && result.diagnosis.suggestions" class="card">
+                <h3>AI 诊断建议</h3>
+                <div v-for="(s, i) in result.diagnosis.suggestions" :key="i">
+                    <strong>{{ s.area }}：</strong>{{ s.issue }} → {{ s.fix }}
+                </div>
+            </div>
+            <div class="card">
+                <h3>简历预览</h3>
+                <div class="toolbar">
+                    <button @click="exportPDF" class="btn-primary">导出PDF</button>
+                    <span class="hint">或直接 Ctrl+P 打印</span>
+                </div>
+                <iframe :srcdoc="result.resume_html" class="resume-iframe" id="resumeFrame"></iframe>
+            </div>
+            <div v-if="result.cover_letter" class="card">
+                <h3>求职信</h3>
+                <p class="cover-letter">{{ result.cover_letter }}</p>
+                <button @click="copyText(result.cover_letter)" class="btn-secondary">复制</button>
+            </div>
+            <div v-if="result.interview_questions" class="card">
+                <h3>模拟面试题</h3>
+                <div v-if="result.interview_questions.tech_questions && result.interview_questions.tech_questions.length">
+                    <h4>技术题</h4>
+                    <ol>
+                        <li v-for="q in result.interview_questions.tech_questions" :key="q.question">
+                            {{ q.question }} <small>({{ q.purpose }})</small>
+                        </li>
+                    </ol>
+                </div>
+                <div v-if="result.interview_questions.project_deep_dive && result.interview_questions.project_deep_dive.length">
+                    <h4>项目深挖</h4>
+                    <ol>
+                        <li v-for="q in result.interview_questions.project_deep_dive" :key="q.question">
+                            {{ q.question }} <small>({{ q.purpose }})</small>
+                        </li>
+                    </ol>
+                </div>
+                <div v-if="result.interview_questions.behavioral_questions && result.interview_questions.behavioral_questions.length">
+                    <h4>行为题</h4>
+                    <ol>
+                        <li v-for="q in result.interview_questions.behavioral_questions" :key="q.question">
+                            {{ q.question }} <small>({{ q.purpose }})</small>
+                        </li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- AI对话修改 -->
+    <section v-show="currentTab === 'ai-chat'" class="tab-content">
+        <h2>AI 简历修改</h2>
+        <div class="card">
+            <p>在简历预览中选中文字，然后输入修改要求。</p>
+            <textarea v-model="modifyInstruction" rows="2" placeholder="修改要求，如：把这段改成xxx / 加一个Python技能点"></textarea>
+            <textarea v-model="selectedText" rows="4" placeholder="要修改的原文（从简历中复制粘贴到这里）"></textarea>
+            <button @click="aiModify" class="btn-primary" :disabled="modifying">
+                {{ modifying ? 'AI 修改中...' : 'AI 修改' }}
+            </button>
+            <div v-if="modifiedText" class="card">
+                <h4>修改结果：</h4>
+                <p>{{ modifiedText }}</p>
+                <button @click="copyText(modifiedText)" class="btn-secondary">复制</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- 模板管理 -->
+    <section v-show="currentTab === 'templates'" class="tab-content">
+        <h2>模板管理</h2>
+        <div class="card">
+            <h3>导入自定义模板</h3>
+            <input v-model="newTemplateName" placeholder="模板名称">
+            <input type="file" accept=".html" @change="handleTemplateUpload">
+            <button @click="uploadTemplate" class="btn-primary" :disabled="!templateFile">上传</button>
+        </div>
+        <div class="card">
+            <h3>可用模板</h3>
+            <div v-for="t in allTemplates" :key="t.id" class="item-row">
+                <span>{{ t.name }} {{ t.is_builtin ? '(内置)' : '' }}</span>
+                <button v-if="!t.is_builtin" @click="deleteTemplate(t.id)" class="btn-small btn-danger">删除</button>
+            </div>
+        </div>
+    </section>
+</div>
+<script src="/static/js/api.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -26,8 +26,14 @@ app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), na
 
 @app.get("/")
 async def root():
-    from fastapi.responses import FileResponse
-    return FileResponse(os.path.join(BASE_DIR, "static", "index.html"))
+    from fastapi.responses import FileResponse, HTMLResponse
+    index_path = os.path.join(BASE_DIR, "static", "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return HTMLResponse(
+        "<html><body style='font-family:sans-serif;padding:40px;text-align:center'>"
+        "<h1>AI简历定制工具</h1><p>服务已启动，等待前端页面...</p></body></html>"
+    )
 
 # 路由将在后续任务中注册
 

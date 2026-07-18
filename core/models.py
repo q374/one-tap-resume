@@ -14,14 +14,13 @@ class BasicInfo:
 
     def to_dict(self):
         d = asdict(self)
-        d.pop("id", None)
         return d
 
     @classmethod
     def from_row(cls, row):
         if row is None:
             return cls()
-        return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k != 'id'})
+        return cls(**{k: row[k] for k in cls.__dataclass_fields__})
 
 @dataclass
 class Education:
@@ -35,14 +34,13 @@ class Education:
 
     def to_dict(self):
         d = asdict(self)
-        d.pop("id", None)
         return d
 
     @classmethod
     def from_row(cls, row):
         if row is None:
             return cls()
-        return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k != 'id'})
+        return cls(**{k: row[k] for k in cls.__dataclass_fields__})
 
 @dataclass
 class Internship:
@@ -56,14 +54,13 @@ class Internship:
 
     def to_dict(self):
         d = asdict(self)
-        d.pop("id", None)
         return d
 
     @classmethod
     def from_row(cls, row):
         if row is None:
             return cls()
-        return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k != 'id'})
+        return cls(**{k: row[k] for k in cls.__dataclass_fields__})
 
 @dataclass
 class Project:
@@ -80,14 +77,13 @@ class Project:
 
     def to_dict(self):
         d = asdict(self)
-        d.pop("id", None)
         return d
 
     @classmethod
     def from_row(cls, row):
         if row is None:
             return cls()
-        return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k != 'id'})
+        return cls(**{k: row[k] for k in cls.__dataclass_fields__})
 
 @dataclass
 class Skill:
@@ -100,14 +96,13 @@ class Skill:
 
     def to_dict(self):
         d = asdict(self)
-        d.pop("id", None)
         return d
 
     @classmethod
     def from_row(cls, row):
         if row is None:
             return cls()
-        return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k != 'id'})
+        return cls(**{k: row[k] for k in cls.__dataclass_fields__})
 
 @dataclass
 class Award:
@@ -119,14 +114,13 @@ class Award:
 
     def to_dict(self):
         d = asdict(self)
-        d.pop("id", None)
         return d
 
     @classmethod
     def from_row(cls, row):
         if row is None:
             return cls()
-        return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k != 'id'})
+        return cls(**{k: row[k] for k in cls.__dataclass_fields__})
 
 @dataclass
 class SelfEvaluation:
@@ -135,14 +129,13 @@ class SelfEvaluation:
 
     def to_dict(self):
         d = asdict(self)
-        d.pop("id", None)
         return d
 
     @classmethod
     def from_row(cls, row):
         if row is None:
             return cls()
-        return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k != 'id'})
+        return cls(**{k: row[k] for k in cls.__dataclass_fields__})
 
 @dataclass
 class UserTemplate:
@@ -155,14 +148,13 @@ class UserTemplate:
 
     def to_dict(self):
         d = asdict(self)
-        d.pop("id", None)
         return d
 
     @classmethod
     def from_row(cls, row):
         if row is None:
             return cls()
-        return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k != 'id'})
+        return cls(**{k: row[k] for k in cls.__dataclass_fields__})
 
 @dataclass
 class ResumeRecord:
@@ -178,11 +170,10 @@ class ResumeRecord:
 
     def to_dict(self):
         d = asdict(self)
-        d.pop("id", None)
         return d
 
     @classmethod
     def from_row(cls, row):
         if row is None:
             return cls()
-        return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k != 'id'})
+        return cls(**{k: row[k] for k in cls.__dataclass_fields__})

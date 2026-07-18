@@ -45,7 +45,7 @@ def clean_html_response(html_content):
         '保证完成': '确保完成', '保证实现': '确保实现', '保证达成': '确保达成',
         '保证成功': '力求成功', '保证质量': '确保质量', '保证按时': '确保按时',
         '一定完成': '确保完成', '一定会': '将会', '肯定能': '力求',
-        '绝对': '', '100%': '',
+        '绝对': '',
     }
 
     for phrase, replacement in absolute_guarantees.items():

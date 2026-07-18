@@ -4,7 +4,7 @@ import os
 # 确保项目根目录在 Python 路径中
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
@@ -13,8 +13,6 @@ import uvicorn
 
 import io
 import os
-import json
-import asyncio
 import uuid
 from datetime import datetime
 
@@ -23,19 +21,14 @@ from core import database as core_db
 from core.database import db
 from core.models import BasicInfo, Education, Internship, Project, Skill, Award, SelfEvaluation
 from core.deepseek_client import call_deepseek, call_deepseek_json
-from core.company_lookup import lookup_company
 from services.experience_service import experience_service
 from services.resume_service import resume_service
 from services.jd_service import jd_service
-from services.cover_letter_service import cover_letter_service
-from services.interview_service import interview_service
-from services.diagnosis_service import diagnosis_service
 from services.template_service import template_service
 from services.ocr_service import ocr_service
 from services.export_service import export_service
 from prompts.experience_parse import EXPERIENCE_PARSE_PROMPT
 from prompts.dedup import DEDUP_PROMPT
-from prompts.company_analysis import build_company_analysis_prompt
 
 app = FastAPI(title="AI简历定制工具", version="2.0.0")
 
@@ -50,6 +43,11 @@ app.add_middleware(
 # 静态文件
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
+@app.on_event("startup")
+async def startup():
+    """应用启动时初始化数据库"""
+    db.init_db()
+
 @app.get("/")
 async def root():
     from fastapi.responses import FileResponse, HTMLResponse
@@ -60,8 +58,6 @@ async def root():
         "<html><body style='font-family:sans-serif;padding:40px;text-align:center'>"
         "<h1>AI简历定制工具</h1><p>服务已启动，等待前端页面...</p></body></html>"
     )
-
-# 路由将在后续任务中注册
 
 # ==================== Experience Routes ====================
 
@@ -92,62 +88,47 @@ async def save_basic_info(data: BasicInfoInput):
     experience_service.save_basic_info(info)
     return {"status": "ok"}
 
-# 通用 CRUD 端点
-VALID_MODULES = ["education", "internships", "projects", "skills", "awards"]
+@app.post("/api/experiences/upload-photo")
+async def upload_photo(file: UploadFile = File(...)):
+    """上传用户照片，返回存储路径"""
+    import aiofiles
+    # 只允许图片格式
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'):
+        raise HTTPException(400, "仅支持 JPG/PNG/GIF/BMP/WEBP 格式的图片")
 
-@app.get("/api/experiences/{module}")
-async def list_module(module: str):
-    if module not in VALID_MODULES:
-        raise HTTPException(404, f"Unknown module: {module}")
-    items = getattr(experience_service, f"list_{module}")()
-    return [item.to_dict() for item in items]
+    # 保存到 data/photos/
+    photos_dir = os.path.join(BASE_DIR, "data", "photos")
+    os.makedirs(photos_dir, exist_ok=True)
+    safe_name = f"photo_{uuid.uuid4().hex}{ext}"
+    file_path = os.path.join(photos_dir, safe_name)
 
-@app.post("/api/experiences/{module}")
-async def add_module_item(module: str, data: dict):
-    if module not in VALID_MODULES:
-        raise HTTPException(404, f"Unknown module: {module}")
-    model_class = {
-        "education": Education, "internships": Internship,
-        "projects": Project, "skills": Skill, "awards": Award
-    }[module]
-    item = model_class(**data)
-    item_id = getattr(experience_service, f"add_{module[:-1] if module.endswith('s') else module}")(item)
-    return {"status": "ok", "id": item_id}
+    async with aiofiles.open(file_path, 'wb') as f:
+        content = await file.read()
+        await f.write(content)
 
-@app.put("/api/experiences/{module}/{item_id}")
-async def update_module_item(module: str, item_id: int, data: dict):
-    if module not in VALID_MODULES:
-        raise HTTPException(404, f"Unknown module: {module}")
-    model_class = {
-        "education": Education, "internships": Internship,
-        "projects": Project, "skills": Skill, "awards": Award
-    }[module]
-    data["id"] = item_id
-    item = model_class(**data)
-    getattr(experience_service, f"update_{module[:-1] if module.endswith('s') else module}")(item)
-    return {"status": "ok"}
+    # 相对路径存入数据库
+    relative_path = f"data/photos/{safe_name}"
+    return {"status": "ok", "photo_path": relative_path}
 
-@app.delete("/api/experiences/{module}/{item_id}")
-async def delete_module_item(module: str, item_id: int):
-    if module not in VALID_MODULES:
-        raise HTTPException(404, f"Unknown module: {module}")
-    getattr(experience_service, f"delete_{module[:-1] if module.endswith('s') else module}")(item_id)
-    return {"status": "ok"}
+@app.get("/api/photos/{filename}")
+async def get_photo(filename: str):
+    """提供照片文件访问，供前端预览"""
+    file_path = os.path.join(BASE_DIR, "data", "photos", filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(404, "照片不存在")
+    return FileResponse(file_path)
 
-@app.put("/api/experiences/{module}/reorder")
-async def reorder_module(module: str, ids: list[int]):
-    if module not in VALID_MODULES:
-        raise HTTPException(404, f"Unknown module: {module}")
-    experience_service.reorder_items(module, ids)
-    return {"status": "ok"}
+# ======== 具体路由（必须在 /{module} 通配符之前声明） ========
 
-# Self evaluation
+# Self evaluation (必须在 /{module} 之前)
 @app.get("/api/experiences/self-evaluation")
 async def get_self_eval():
     return experience_service.get_self_evaluation().to_dict()
 
 @app.post("/api/experiences/self-evaluation")
-async def save_self_eval(data: dict):
+async def save_self_eval(request: Request):
+    data = await request.json()
     ev = SelfEvaluation(content=data.get("content", ""))
     experience_service.save_self_evaluation(ev)
     return {"status": "ok"}
@@ -186,7 +167,62 @@ async def check_duplicate(data: DedupInput):
     result = await call_deepseek_json(prompt)
     return result
 
-# ==================== Resume Generation Route ====================
+# ======== 通用 CRUD 端点（/{module} 通配符 — 放在最后） ========
+
+VALID_MODULES = ["education", "internships", "projects", "skills", "awards"]
+
+@app.get("/api/experiences/{module}")
+async def list_module(module: str):
+    if module not in VALID_MODULES:
+        raise HTTPException(404, f"Unknown module: {module}")
+    items = getattr(experience_service, f"list_{module}")()
+    return [item.to_dict() for item in items]
+
+@app.post("/api/experiences/{module}")
+async def add_module_item(module: str, request: Request):
+    if module not in VALID_MODULES:
+        raise HTTPException(404, f"Unknown module: {module}")
+    model_class = {
+        "education": Education, "internships": Internship,
+        "projects": Project, "skills": Skill, "awards": Award
+    }[module]
+    data = await request.json()
+    item = model_class(**data)
+    item_id = getattr(experience_service, f"add_{module[:-1] if module.endswith('s') else module}")(item)
+    return {"status": "ok", "id": item_id}
+
+@app.put("/api/experiences/{module}/{item_id}")
+async def update_module_item(module: str, item_id: int, request: Request):
+    if module not in VALID_MODULES:
+        raise HTTPException(404, f"Unknown module: {module}")
+    model_class = {
+        "education": Education, "internships": Internship,
+        "projects": Project, "skills": Skill, "awards": Award
+    }[module]
+    data = await request.json()
+    data["id"] = item_id
+    item = model_class(**data)
+    getattr(experience_service, f"update_{module[:-1] if module.endswith('s') else module}")(item)
+    return {"status": "ok"}
+
+@app.delete("/api/experiences/{module}/{item_id}")
+async def delete_module_item(module: str, item_id: int):
+    if module not in VALID_MODULES:
+        raise HTTPException(404, f"Unknown module: {module}")
+    getattr(experience_service, f"delete_{module[:-1] if module.endswith('s') else module}")(item_id)
+    return {"status": "ok"}
+
+class ReorderInput(BaseModel):
+    ids: list[int]
+
+@app.put("/api/experiences/{module}/reorder")
+async def reorder_module(module: str, data: ReorderInput):
+    if module not in VALID_MODULES:
+        raise HTTPException(404, f"Unknown module: {module}")
+    experience_service.reorder_items(module, data.ids)
+    return {"status": "ok"}
+
+# ==================== Resume Generation Route (MVP) ====================
 
 class GenerateRequest(BaseModel):
     jd_text: str
@@ -194,53 +230,33 @@ class GenerateRequest(BaseModel):
 
 @app.post("/api/resumes/generate")
 async def generate_resume(req: GenerateRequest):
-    """主生成接口 — 并行生成简历 + 求职信 + 面试题 + 诊断"""
+    """MVP核心接口 — 根据经历库和JD生成简历HTML"""
+    # 1. 获取经历和模板
     exp_data = experience_service.export_all()
     experience_text = exp_data["text"]
     photo_path = exp_data.get("photo_path", "")
 
+    if not experience_text.strip():
+        raise HTTPException(400, "请先在「经历管理」中录入你的经历")
+
     template_html = template_service.get_template_html(req.template_type)
 
-    jd_result = await jd_service.clean(req.jd_text)
+    # 2. 生成简历（单次AI调用，不再并行生成求职信/面试题/公司分析等）
+    resume_result = await resume_service.generate(
+        template_html, experience_text, req.jd_text, photo_path
+    )
 
-    company_name = jd_result.get("company_name", "")
-    clean_jd = jd_result.get("cleaned_jd", req.jd_text)
+    if not resume_result.get("html"):
+        raise HTTPException(500, "简历生成失败，请重试")
 
-    resume_task = resume_service.generate(template_html, experience_text, clean_jd, photo_path)
-    cover_task = cover_letter_service.generate(experience_text, clean_jd)
-    interview_task = interview_service.generate(experience_text, clean_jd)
-
-    results = await asyncio.gather(resume_task, cover_task, interview_task)
-
-    resume_result = results[0]
-    cover_letter = results[1]
-    interview_questions = results[2]
-
-    diagnosis = {}
-    if resume_result["html"]:
-        diagnosis = await diagnosis_service.diagnose(resume_result["html"])
-
-    company_analysis = {}
-    if company_name:
-        company_data = lookup_company(company_name)
-        if company_data:
-            try:
-                company_analysis = await call_deepseek_json(
-                    build_company_analysis_prompt(company_data, clean_jd)
-                )
-            except Exception:
-                company_analysis = {"verdict": "数据不足，无法判断", "risk_level": "unknown"}
-
+    # 3. 保存记录
     conn = db.get_connection()
     conn.execute(
         """INSERT INTO resume_records
-           (jd_text, jd_cleaned, template_name, html_content, cover_letter,
-            interview_questions, company_analysis, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (req.jd_text, clean_jd, req.template_type,
-         resume_result.get("html", ""), cover_letter,
-         json.dumps(interview_questions, ensure_ascii=False),
-         json.dumps(company_analysis, ensure_ascii=False),
+           (jd_text, jd_cleaned, template_name, html_content, created_at)
+           VALUES (?, ?, ?, ?, ?)""",
+        (req.jd_text, req.jd_text, req.template_type,
+         resume_result.get("html", ""),
          datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     )
     conn.commit()
@@ -250,11 +266,6 @@ async def generate_resume(req: GenerateRequest):
         "resume_html": resume_result.get("html"),
         "resume_valid": resume_result.get("valid", False),
         "resume_issues": resume_result.get("issues", []),
-        "cover_letter": cover_letter,
-        "interview_questions": interview_questions,
-        "jd_analysis": jd_result,
-        "diagnosis": diagnosis,
-        "company_analysis": company_analysis,
     }
 
 # ==================== Template Routes ====================
@@ -280,7 +291,8 @@ async def delete_template(template_id: int):
 # ==================== JD Routes ====================
 
 @app.post("/api/jd/clean")
-async def clean_jd(data: dict):
+async def clean_jd(request: Request):
+    data = await request.json()
     jd_text = data.get("jd_text", "")
     if not jd_text:
         raise HTTPException(400, "jd_text is required")
@@ -314,20 +326,33 @@ async def ocr_extract(files: list[UploadFile] = File(...)):
 
 # ==================== Export Routes ====================
 
-class ExportRequest(BaseModel):
-    html_content: str
-
 @app.post("/api/export/pdf")
-async def export_pdf(data: ExportRequest):
+async def export_pdf(request: Request):
+    """导出 PDF — 优先使用 WeasyPrint，失败时降级为 HTML 下载"""
+    data = await request.json()
+    html_content = data.get("html_content", "")
+    if not html_content:
+        raise HTTPException(400, "html_content is required")
+
     try:
-        pdf_bytes = export_service.to_pdf(data.html_content)
+        pdf_bytes = export_service.to_pdf(html_content)
         return StreamingResponse(
             io.BytesIO(pdf_bytes),
             media_type="application/pdf",
             headers={"Content-Disposition": "attachment; filename=resume.pdf"}
         )
-    except Exception as e:
-        raise HTTPException(500, str(e))
+    except (OSError, RuntimeError) as e:
+        # WeasyPrint 不可用时（如 Windows 缺 GTK 库），降级为 HTML 文件下载
+        # 用户可以用浏览器的 Ctrl+P 打印为 PDF
+        html_full = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>简历</title>
+<style>@media print {{ body {{ -webkit-print-color-adjust: exact; }} }}</style>
+</head><body>{html_content}</body></html>"""
+        return StreamingResponse(
+            io.BytesIO(html_full.encode("utf-8")),
+            media_type="text/html",
+            headers={"Content-Disposition": "attachment; filename=resume.html"}
+        )
 
 # ==================== AI Chat Routes ====================
 

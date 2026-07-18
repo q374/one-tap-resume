@@ -3,25 +3,40 @@ const { createApp, ref, reactive, onMounted } = Vue;
 createApp({
     setup() {
         const tabs = [
-            {id: 'experience', label: '经历管理'},
-            {id: 'generate', label: '简历生成'},
-            {id: 'ai-chat', label: 'AI修改'},
-            {id: 'templates', label: '模板'},
+            {id: 'experience', label: '📝 经历管理'},
+            {id: 'generate', label: '🎯 简历生成'},
         ];
         const currentTab = ref('experience');
 
-        // === 经历管理 ===
+        // ======== 经历管理 ========
         const basicInfo = reactive({name:'', phone:'', email:'', age:'', job_target:'', photo_path:''});
         const modules = reactive([
-            {key:'education', label:'教育背景', items:[]},
-            {key:'internships', label:'实习经历', items:[]},
-            {key:'projects', label:'项目经历', items:[]},
-            {key:'skills', label:'技能', items:[]},
-            {key:'awards', label:'获奖情况', items:[]},
+            {key:'education', label:'教育背景', icon:'🎓', items:[],
+                hint:'从最高学历开始填写，每条包含学校、专业、学位、起止时间'},
+            {key:'internships', label:'工作经历', icon:'💼', items:[],
+                hint:'包含全职工作和实习经历，每段经历写清楚公司、职位、起止时间和主要职责'},
+            {key:'projects', label:'项目经历', icon:'📁', items:[],
+                hint:'挑2-3个最有代表性的项目，用STAR法则描述（背景→动作→成果），尽量量化'},
+            {key:'skills', label:'技能', icon:'🛠', items:[],
+                hint:'列出你掌握的技术和工具，每条标上熟练度和一句证据（如"独立开发过3个SPA项目"）'},
+            {key:'awards', label:'获奖情况', icon:'🏆', items:[],
+                hint:'竞赛获奖、奖学金、荣誉称号等。编程比赛获奖放这里，编程技能放「技能」模块'},
         ]);
         const selfEval = reactive({content:''});
         const pasteText = ref('');
         const parsing = ref(false);
+        const photoInput = ref(null);
+        const photoPreviewUrl = ref('');
+
+        function getModule(key) {
+            return modules.find(m => m.key === key) || {items:[]};
+        }
+
+        function getPhotoUrl(photoPath) {
+            if (!photoPath) return '';
+            const filename = photoPath.replace(/\\/g, '/').split('/').pop();
+            return '/api/photos/' + filename;
+        }
 
         async function loadExperiences() {
             try {
@@ -33,69 +48,214 @@ createApp({
                 modules.find(m=>m.key==='skills').items = data.skills || [];
                 modules.find(m=>m.key==='awards').items = data.awards || [];
                 Object.assign(selfEval, data.self_evaluation || {});
-            } catch(e) { console.error(e); }
+                // 刷新照片预览
+                if (basicInfo.photo_path) {
+                    photoPreviewUrl.value = getPhotoUrl(basicInfo.photo_path);
+                }
+            } catch(e) { console.error('加载经历失败:', e); }
         }
 
-        async function saveBasicInfo() { await API.post('/api/experiences/basic-info', {...basicInfo}); alert('已保存'); }
-        async function saveSelfEval() { await API.post('/api/experiences/self-evaluation', {content: selfEval.content}); alert('已保存'); }
+        async function saveBasicInfo() {
+            try {
+                await API.post('/api/experiences/basic-info', {...basicInfo});
+                alert('基本信息已保存');
+            } catch(e) { alert('保存失败: ' + e.message); }
+        }
+
+        async function saveSelfEval() {
+            try {
+                await API.post('/api/experiences/self-evaluation', {content: selfEval.content});
+                alert('自我评价已保存');
+            } catch(e) { alert('保存失败: ' + e.message); }
+        }
 
         function formatItem(item) {
-            const vals = Object.entries(item).filter(([k,v]) => typeof v === 'string' && v && k !== 'id' && k !== 'sort_order');
-            return vals.slice(0, 4).map(([k,v]) => v).join(' | ');
+            const vals = Object.entries(item).filter(([k,v]) =>
+                typeof v === 'string' && v && k !== 'id' && k !== 'sort_order'
+            );
+            return vals.slice(0, 4).map(([k,v]) => v).join(' | ') || '(空)';
         }
 
-        async function editItem(modKey, item) {
-            const fields = Object.keys(item).filter(k => k !== 'id' && k !== 'sort_order' && typeof item[k] === 'string');
-            let promptStr = fields.map(f => item[f] || '').join(' | ');
-            promptStr = prompt(`编辑 (${fields.join(',')}):`, promptStr);
-            if (!promptStr) return;
-            item[fields[0]] = promptStr;
-            await API.put(`/api/experiences/${modKey}/${item.id}`, item);
-            await loadExperiences();
+        // 分字段编辑表单
+        const editingId = ref(null);
+        const editFields = reactive({});
+
+        const fieldDefs = {
+            education: [
+                {key:'school', label:'学校', placeholder:'例：清华大学'},
+                {key:'major', label:'专业', placeholder:'例：计算机科学'},
+                {key:'degree', label:'学位', placeholder:'例：本科'},
+                {key:'start_date', label:'入学时间', placeholder:'例：2020.09'},
+                {key:'end_date', label:'毕业时间', placeholder:'例：2024.07'},
+            ],
+            internships: [
+                {key:'company', label:'公司', placeholder:'例：字节跳动'},
+                {key:'position', label:'职位', placeholder:'例：Python后端开发工程师'},
+                {key:'start_date', label:'开始时间', placeholder:'例：2023.07'},
+                {key:'end_date', label:'结束时间', placeholder:'例：至今'},
+                {key:'description', label:'主要职责', placeholder:'例：负责推荐系统后台开发，设计并实现了高并发API网关...'},
+            ],
+            projects: [
+                {key:'name', label:'项目名称', placeholder:'例：电商后台系统'},
+                {key:'role', label:'担任角色', placeholder:'例：后端负责人'},
+                {key:'tech_stack', label:'技术栈', placeholder:'例：Python, FastAPI, PostgreSQL'},
+                {key:'start_date', label:'开始时间', placeholder:'例：2023.01'},
+                {key:'end_date', label:'结束时间', placeholder:'例：2023.06'},
+                {key:'background', label:'项目背景', placeholder:'例：旧系统性能瓶颈，需重构...'},
+                {key:'actions', label:'你的行动', placeholder:'例：主导架构设计，独立完成核心模块开发...'},
+                {key:'results', label:'项目成果', placeholder:'例：QPS从1000提升至10000，支撑双11峰值'},
+            ],
+            skills: [
+                {key:'name', label:'技能名称', placeholder:'例：Python'},
+                {key:'level', label:'熟练度', placeholder:'例：精通 / 熟练 / 了解'},
+                {key:'evidence', label:'掌握证据', placeholder:'例：独立开发过3个商业项目'},
+                {key:'category', label:'分类', placeholder:'例：编程语言 / 框架 / 数据库'},
+            ],
+            awards: [
+                {key:'name', label:'奖项名称', placeholder:'例：ACM-ICPC亚洲区域赛'},
+                {key:'level', label:'奖项级别', placeholder:'例：国家级 / 省级 / 校级'},
+                {key:'date', label:'获奖时间', placeholder:'例：2023.06'},
+            ],
+        };
+
+        function getFields(modKey) {
+            return fieldDefs[modKey] || [{key:'name', label:'名称', placeholder:'输入名称'}];
+        }
+
+        function startEdit(modKey, item) {
+            editingId.value = item.id;
+            const fields = getFields(modKey);
+            // 清空并填充编辑字段
+            Object.keys(editFields).forEach(k => delete editFields[k]);
+            fields.forEach(f => {
+                editFields[f.key] = item[f.key] || '';
+            });
+        }
+
+        function cancelEdit() {
+            editingId.value = null;
+        }
+
+        async function confirmEdit(modKey, item) {
+            const fields = getFields(modKey);
+            // 将 editFields 的值写回 item
+            fields.forEach(f => {
+                item[f.key] = editFields[f.key] || '';
+            });
+            try {
+                await API.put(`/api/experiences/${modKey}/${item.id}`, item);
+                await loadExperiences();
+                cancelEdit();
+            } catch(e) { alert('更新失败: ' + e.message); }
         }
 
         async function deleteItem(modKey, id) {
             if (!confirm('确认删除？')) return;
-            await API.del(`/api/experiences/${modKey}/${id}`);
-            await loadExperiences();
+            try {
+                await API.del(`/api/experiences/${modKey}/${id}`);
+                await loadExperiences();
+            } catch(e) { alert('删除失败: ' + e.message); }
         }
 
-        async function addItem(modKey) {
-            const emptyItem = {name:'', sort_order: 0};
-            await API.post(`/api/experiences/${modKey}`, emptyItem);
-            await loadExperiences();
+        // 内联添加（替代 prompt，兼容 VS Code 浏览器）
+        const addingModule = ref(null);
+        const newItemName = ref('');
+
+        function startAddItem(modKey) {
+            addingModule.value = modKey;
+            newItemName.value = '';
         }
 
+        function cancelAdd() {
+            addingModule.value = null;
+            newItemName.value = '';
+        }
+
+        async function confirmAddItem(modKey) {
+            const name = newItemName.value.trim();
+            if (!name) return;
+            const emptyItem = {name, sort_order: 0};
+            try {
+                await API.post(`/api/experiences/${modKey}`, emptyItem);
+                await loadExperiences();
+                cancelAdd();
+            } catch(e) { alert('添加失败: ' + e.message); }
+        }
+
+        // 照片上传
+        async function uploadPhoto(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const formData = new FormData();
+            formData.append('file', file);
+            try {
+                const r = await fetch('/api/experiences/upload-photo', { method: 'POST', body: formData });
+                const data = await r.json();
+                if (data.photo_path) {
+                    basicInfo.photo_path = data.photo_path;
+                    photoPreviewUrl.value = getPhotoUrl(data.photo_path);
+                    await saveBasicInfo();
+                    alert('照片已上传并保存');
+                }
+            } catch(err) {
+                alert('照片上传失败: ' + err.message);
+            }
+        }
+
+        function removePhoto() {
+            if (!confirm('确认移除照片？')) return;
+            basicInfo.photo_path = '';
+            photoPreviewUrl.value = '';
+            saveBasicInfo();
+        }
+
+        // AI 智能导入
         async function parseText() {
-            if (!pasteText.value.trim()) return;
+            if (!pasteText.value.trim()) { alert('请先粘贴经历文本'); return; }
             parsing.value = true;
             try {
                 const r = await API.post('/api/experiences/parse-text', {text: pasteText.value});
-                if (r.basic_info && r.basic_info.name) await API.post('/api/experiences/basic-info', r.basic_info);
-                for (const edu of (r.education || [])) await API.post('/api/experiences/education', edu);
-                for (const intern of (r.internships || [])) await API.post('/api/experiences/internships', intern);
-                for (const proj of (r.projects || [])) await API.post('/api/experiences/projects', proj);
-                for (const skill of (r.skills || [])) await API.post('/api/experiences/skills', skill);
-                for (const award of (r.awards || [])) await API.post('/api/experiences/awards', award);
-                if (r.self_evaluation && r.self_evaluation.content) await API.post('/api/experiences/self-evaluation', r.self_evaluation);
+                let count = 0;
+                if (r.basic_info && r.basic_info.name) {
+                    await API.post('/api/experiences/basic-info', r.basic_info);
+                }
+                for (const edu of (r.education || [])) {
+                    await API.post('/api/experiences/education', edu); count++;
+                }
+                // 兼容 work_experience 和 internships
+                const workExps = r.work_experience || r.internships || [];
+                for (const exp of workExps) {
+                    await API.post('/api/experiences/internships', exp); count++;
+                }
+                for (const proj of (r.projects || [])) {
+                    await API.post('/api/experiences/projects', proj); count++;
+                }
+                for (const skill of (r.skills || [])) {
+                    await API.post('/api/experiences/skills', skill); count++;
+                }
+                for (const award of (r.awards || [])) {
+                    await API.post('/api/experiences/awards', award); count++;
+                }
+                if (r.self_evaluation && r.self_evaluation.content) {
+                    await API.post('/api/experiences/self-evaluation', r.self_evaluation);
+                }
                 await loadExperiences();
                 pasteText.value = '';
-                alert('AI 解析完成，经历已自动导入！');
+                alert(`AI 解析完成！已导入 ${count} 条经历到各模块\n\n请逐模块检查信息是否准确。`);
             } catch(e) {
-                alert('解析失败: ' + e.message);
+                alert('AI解析失败: ' + e.message + '\n\n请检查: 1) .env中是否配置了API Key 2) 网络是否正常');
             }
             parsing.value = false;
         }
 
-        // === 简历生成 ===
+        // ======== 简历生成 ========
         const jdText = ref('');
         const templateType = ref('default');
         const generating = ref(false);
         const result = ref(null);
-        const ocrText = ref('');
 
         async function generateResume() {
-            if (!jdText.value.trim()) { alert('请先粘贴 JD'); return; }
+            if (!jdText.value.trim()) { alert('请先粘贴目标岗位的JD'); return; }
             generating.value = true;
             result.value = null;
             try {
@@ -105,113 +265,58 @@ createApp({
                 });
                 currentTab.value = 'generate';
             } catch(e) {
-                alert('生成失败: ' + e.message);
+                alert('简历生成失败: ' + e.message + '\n\n可能原因: 1) 经历库为空 2) API Key未配置 3) 网络问题');
             }
             generating.value = false;
         }
 
-        async function handleOCRUpload(e) {
-            const files = e.target.files;
-            if (!files.length) return;
-            const formData = new FormData();
-            for (const f of files) formData.append('files', f);
-            const r = await fetch('/api/ocr/extract', {method:'POST', body: formData});
-            const data = await r.json();
-            ocrText.value = data.merged_text;
-        }
-
-        async function exportPDF() {
-            if (!result.value || !result.value.resume_html) return;
+        async function exportFile() {
+            if (!result.value || !result.value.resume_html) {
+                alert('请先生成简历'); return;
+            }
             try {
                 const r = await fetch('/api/export/pdf', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({html_content: result.value.resume_html})
                 });
+                if (!r.ok) throw new Error('导出失败');
                 const blob = await r.blob();
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
-                a.href = url; a.download = 'resume.pdf'; a.click();
+                const contentType = r.headers.get('Content-Type') || '';
+                a.download = contentType.includes('pdf') ? 'resume.pdf' : 'resume.html';
+                a.href = url; a.click();
                 URL.revokeObjectURL(url);
             } catch(e) {
-                alert('PDF导出失败: ' + e.message);
+                alert('导出失败: ' + e.message + '\n\n备用方案: 在预览框中 Ctrl+P 打印为PDF');
             }
         }
 
         function copyText(text) {
-            navigator.clipboard.writeText(text).then(() => alert('已复制'));
+            navigator.clipboard.writeText(text).then(
+                () => alert('已复制到剪贴板'),
+                () => alert('复制失败，请手动选中文字 Ctrl+C')
+            );
         }
 
-        // === AI 修改 ===
-        const modifyInstruction = ref('');
-        const selectedText = ref('');
-        const modifiedText = ref('');
-        const modifying = ref(false);
 
-        async function aiModify() {
-            if (!selectedText.value.trim() || !modifyInstruction.value.trim()) {
-                alert('请输入要修改的原文和修改要求');
-                return;
-            }
-            modifying.value = true;
-            try {
-                const r = await API.post('/api/ai/modify', {
-                    selected_text: selectedText.value,
-                    instruction: modifyInstruction.value,
-                });
-                modifiedText.value = r.modified_text;
-            } catch(e) {
-                alert('修改失败: ' + e.message);
-            }
-            modifying.value = false;
-        }
-
-        // === 模板管理 ===
-        const allTemplates = ref([]);
-        const customTemplates = ref([]);
-        const newTemplateName = ref('');
-        const templateFile = ref(null);
-
-        async function loadTemplates() {
-            try {
-                allTemplates.value = await API.get('/api/templates');
-                customTemplates.value = allTemplates.value.filter(t => !t.is_builtin);
-            } catch(e) { console.error(e); }
-        }
-
-        function handleTemplateUpload(e) { templateFile.value = e.target.files[0]; }
-
-        async function uploadTemplate() {
-            if (!templateFile.value || !newTemplateName.value.trim()) return;
-            const html = await templateFile.value.text();
-            await API.post('/api/templates/upload', {name: newTemplateName.value, html_content: html});
-            newTemplateName.value = '';
-            templateFile.value = null;
-            await loadTemplates();
-            alert('模板已上传，AI已自动解析');
-        }
-
-        async function deleteTemplate(id) {
-            if (!confirm('确认删除？')) return;
-            await API.del(`/api/templates/${id}`);
-            await loadTemplates();
-        }
-
+        // ======== 初始化 ========
         onMounted(async () => {
             await loadExperiences();
-            await loadTemplates();
         });
 
         return {
             tabs, currentTab,
-            basicInfo, modules, selfEval, pasteText, parsing,
+            basicInfo, modules, selfEval, pasteText, parsing, photoPreviewUrl,
+            getPhotoUrl,
             saveBasicInfo, saveSelfEval, formatItem,
-            editItem, deleteItem, addItem, parseText,
-            jdText, templateType, generating, result, ocrText,
-            generateResume, handleOCRUpload, exportPDF, copyText,
-            modifyInstruction, selectedText, modifiedText, modifying, aiModify,
-            allTemplates, customTemplates, newTemplateName, templateFile,
-            loadTemplates, handleTemplateUpload, uploadTemplate, deleteTemplate,
+            addingModule, newItemName, startAddItem, cancelAdd, confirmAddItem,
+            editingId, editFields, getFields, startEdit, cancelEdit, confirmEdit,
+            deleteItem, loadExperiences,
+            uploadPhoto, removePhoto, parseText,
+            jdText, templateType, generating, result,
+            generateResume, exportFile, copyText,
         };
     }
 }).mount('#app');

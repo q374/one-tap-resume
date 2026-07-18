@@ -94,11 +94,16 @@
                     </div>
                 </div>
             </div>
-            <!-- 内联添加表单 -->
-            <div v-if="addingModule === mod.key" class="inline-form">
-                <input v-model="newItemName" :placeholder="'输入' + mod.label + '名称'" @keyup.enter="confirmAddItem(mod.key)" @keyup.escape="cancelAdd">
-                <button @click="confirmAddItem(mod.key)" class="btn-small">确认</button>
-                <button @click="cancelAdd" class="btn-small">取消</button>
+            <!-- 添加新条目表单（复用编辑表单） -->
+            <div v-if="addingModule === mod.key" class="edit-form">
+                <div v-for="field in getFields(mod.key)" :key="'add_'+field.key" class="edit-field">
+                    <label>{{ field.label }}</label>
+                    <input v-model="editFields[field.key]" :placeholder="field.placeholder">
+                </div>
+                <div class="edit-actions">
+                    <button @click="confirmAddItem(mod.key)" class="btn-small btn-primary">保存</button>
+                    <button @click="cancelAdd" class="btn-small">取消</button>
+                </div>
             </div>
             <button v-else @click="startAddItem(mod.key)" class="btn-primary">+ 添加{{ mod.label }}</button>
         </div>
@@ -189,12 +194,53 @@ ACM-ICPC亚洲区域赛 银奖 2022
             <div class="card">
                 <h3>📄 简历预览</h3>
                 <div class="toolbar">
-                    <button @click="exportFile" class="btn-primary">📥 下载简历</button>
-                    <span class="hint">或直接在预览框中 Ctrl+P 打印为PDF</span>
+                    <button @click="exportFile" class="btn-primary">🖨 打印 / 导出PDF</button>
+                    <span class="hint">在打印对话框中选择「另存为PDF」即可导出</span>
                 </div>
                 <iframe :srcdoc="result.resume_html" class="resume-iframe" id="resumeFrame"></iframe>
             </div>
 
+        </div>
+    </section>
+
+    <!-- ======== Tab3: 求职材料 ======== -->
+    <section v-show="currentTab === 'extra'" class="tab-content">
+        <h2>📋 求职材料</h2>
+        <p class="section-desc">基于你在「简历生成」中输入的JD和经历库，手动生成求职信和模拟面试题</p>
+        <p class="hint" v-if="!jdText.trim()">⚠️ 请先在「简历生成」Tab粘贴JD，再回来生成求职材料</p>
+
+        <div class="card">
+            <h3>📝 求职信</h3>
+            <p class="field-hint">AI根据你的经历和JD，写一段200-300字的求职信/自我介绍，说明你为什么适合这个岗位</p>
+            <button @click="genCoverLetter" class="btn-primary" :disabled="genCoverLoading || !jdText.trim()">
+                {{ genCoverLoading ? '⏳ 生成中...' : '🤖 生成求职信' }}
+            </button>
+            <div v-if="coverLetter" class="result-box" style="margin-top:12px">
+                <div class="cover-letter-text">{{ coverLetter }}</div>
+                <button @click="copyText(coverLetter)" class="btn-secondary" style="margin-top:8px">📋 复制</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>🎤 模拟面试题</h3>
+            <p class="field-hint">AI基于JD和你的项目经历，生成8-10道面试题，分技术题、项目深挖、行为题三类</p>
+            <button @click="genInterview" class="btn-primary" :disabled="genIntvLoading || !jdText.trim()">
+                {{ genIntvLoading ? '⏳ 生成中...' : '🤖 生成面试题' }}
+            </button>
+            <div v-if="interviewQs" class="interview-section">
+                <div v-if="interviewQs.tech_questions && interviewQs.tech_questions.length" style="margin-top:12px">
+                    <h4>🔧 技术题</h4>
+                    <ol><li v-for="q in interviewQs.tech_questions" :key="q.question">{{ q.question }} <small>— {{ q.purpose }}</small></li></ol>
+                </div>
+                <div v-if="interviewQs.project_deep_dive && interviewQs.project_deep_dive.length" style="margin-top:12px">
+                    <h4>📁 项目深挖</h4>
+                    <ol><li v-for="q in interviewQs.project_deep_dive" :key="q.question">{{ q.question }} <small>— {{ q.purpose }}</small></li></ol>
+                </div>
+                <div v-if="interviewQs.behavioral_questions && interviewQs.behavioral_questions.length" style="margin-top:12px">
+                    <h4>💬 行为题</h4>
+                    <ol><li v-for="q in interviewQs.behavioral_questions" :key="q.question">{{ q.question }} <small>— {{ q.purpose }}</small></li></ol>
+                </div>
+            </div>
         </div>
     </section>
 </div>

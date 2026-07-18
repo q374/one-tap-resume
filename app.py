@@ -27,6 +27,8 @@ from services.jd_service import jd_service
 from services.template_service import template_service
 from services.ocr_service import ocr_service
 from services.export_service import export_service
+from services.cover_letter_service import cover_letter_service
+from services.interview_service import interview_service
 from prompts.experience_parse import EXPERIENCE_PARSE_PROMPT
 from prompts.dedup import DEDUP_PROMPT
 
@@ -90,24 +92,38 @@ async def save_basic_info(data: BasicInfoInput):
 
 @app.post("/api/experiences/upload-photo")
 async def upload_photo(file: UploadFile = File(...)):
-    """上传用户照片，返回存储路径"""
+    """上传用户照片，自动修正EXIF旋转，返回存储路径"""
     import aiofiles
-    # 只允许图片格式
+    from PIL import Image, ImageOps
+
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'):
         raise HTTPException(400, "仅支持 JPG/PNG/GIF/BMP/WEBP 格式的图片")
 
-    # 保存到 data/photos/
-    photos_dir = os.path.join(BASE_DIR, "data", "photos")
-    os.makedirs(photos_dir, exist_ok=True)
-    safe_name = f"photo_{uuid.uuid4().hex}{ext}"
-    file_path = os.path.join(photos_dir, safe_name)
+    content = await file.read()
 
-    async with aiofiles.open(file_path, 'wb') as f:
-        content = await file.read()
-        await f.write(content)
+    # 用Pillow修正EXIF旋转（手机竖拍照片自动转正）
+    try:
+        from io import BytesIO
+        img = Image.open(BytesIO(content))
+        img = ImageOps.exif_transpose(img)  # 根据EXIF自动旋转
+        # 统一转为JPEG保存
+        if img.mode in ('RGBA', 'P'):
+            img = img.convert('RGB')
+        photos_dir = os.path.join(BASE_DIR, "data", "photos")
+        os.makedirs(photos_dir, exist_ok=True)
+        safe_name = f"photo_{uuid.uuid4().hex}.jpg"
+        file_path = os.path.join(photos_dir, safe_name)
+        img.save(file_path, 'JPEG', quality=90)
+    except Exception:
+        # Pillow处理失败时直接保存原文件
+        photos_dir = os.path.join(BASE_DIR, "data", "photos")
+        os.makedirs(photos_dir, exist_ok=True)
+        safe_name = f"photo_{uuid.uuid4().hex}{ext}"
+        file_path = os.path.join(photos_dir, safe_name)
+        async with aiofiles.open(file_path, 'wb') as f:
+            await f.write(content)
 
-    # 相对路径存入数据库
     relative_path = f"data/photos/{safe_name}"
     return {"status": "ok", "photo_path": relative_path}
 
@@ -267,6 +283,29 @@ async def generate_resume(req: GenerateRequest):
         "resume_valid": resume_result.get("valid", False),
         "resume_issues": resume_result.get("issues", []),
     }
+
+# ==================== 求职信 & 面试题 ====================
+
+class ExtraRequest(BaseModel):
+    jd_text: str
+
+@app.post("/api/resumes/cover-letter")
+async def generate_cover_letter(req: ExtraRequest):
+    """生成求职信"""
+    exp_data = experience_service.export_all()
+    if not exp_data["text"].strip():
+        raise HTTPException(400, "请先在「经历管理」中录入你的经历")
+    result = await cover_letter_service.generate(exp_data["text"], req.jd_text)
+    return {"cover_letter": result}
+
+@app.post("/api/resumes/interview-questions")
+async def generate_interview_questions(req: ExtraRequest):
+    """生成模拟面试题"""
+    exp_data = experience_service.export_all()
+    if not exp_data["text"].strip():
+        raise HTTPException(400, "请先在「经历管理」中录入你的经历")
+    result = await interview_service.generate(exp_data["text"], req.jd_text)
+    return result
 
 # ==================== Template Routes ====================
 

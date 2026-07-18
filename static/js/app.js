@@ -5,6 +5,7 @@ createApp({
         const tabs = [
             {id: 'experience', label: '📝 经历管理'},
             {id: 'generate', label: '🎯 简历生成'},
+            {id: 'extra', label: '📋 求职材料'},
         ];
         const currentTab = ref('experience');
 
@@ -157,26 +158,29 @@ createApp({
             } catch(e) { alert('删除失败: ' + e.message); }
         }
 
-        // 内联添加（替代 prompt，兼容 VS Code 浏览器）
+        // 内联添加（展开完整字段表单）
         const addingModule = ref(null);
-        const newItemName = ref('');
 
         function startAddItem(modKey) {
             addingModule.value = modKey;
-            newItemName.value = '';
+            // 清空编辑字段
+            Object.keys(editFields).forEach(k => delete editFields[k]);
         }
 
         function cancelAdd() {
             addingModule.value = null;
-            newItemName.value = '';
         }
 
         async function confirmAddItem(modKey) {
-            const name = newItemName.value.trim();
-            if (!name) return;
-            const emptyItem = {name, sort_order: 0};
+            const fields = getFields(modKey);
+            const item = {sort_order: 0};
+            fields.forEach(f => { item[f.key] = editFields[f.key] || ''; });
+            // 至少要有名称
+            if (!item.name && !item.school && !item.company) {
+                alert('请至少填写一项内容'); return;
+            }
             try {
-                await API.post(`/api/experiences/${modKey}`, emptyItem);
+                await API.post(`/api/experiences/${modKey}`, item);
                 await loadExperiences();
                 cancelAdd();
             } catch(e) { alert('添加失败: ' + e.message); }
@@ -274,24 +278,41 @@ createApp({
             if (!result.value || !result.value.resume_html) {
                 alert('请先生成简历'); return;
             }
-            try {
-                const r = await fetch('/api/export/pdf', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({html_content: result.value.resume_html})
-                });
-                if (!r.ok) throw new Error('导出失败');
-                const blob = await r.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                const contentType = r.headers.get('Content-Type') || '';
-                a.download = contentType.includes('pdf') ? 'resume.pdf' : 'resume.html';
-                a.href = url; a.click();
-                URL.revokeObjectURL(url);
-            } catch(e) {
-                alert('导出失败: ' + e.message + '\n\n备用方案: 在预览框中 Ctrl+P 打印为PDF');
+            // 直接触发浏览器打印 → 另存为PDF（中文完美渲染，格式与预览一致）
+            const iframe = document.getElementById('resumeFrame');
+            if (iframe && iframe.contentWindow) {
+                iframe.contentWindow.focus();
+                iframe.contentWindow.print();
+            } else {
+                alert('请在预览框中按 Ctrl+P → 另存为PDF');
             }
         }
+
+        // ======== 求职材料（求职信 + 面试题） ========
+        const coverLetter = ref('');
+        const genCoverLoading = ref(false);
+        const interviewQs = ref(null);
+        const genIntvLoading = ref(false);
+
+        async function genCoverLetter() {
+            if (!jdText.value.trim()) { alert('请先在「简历生成」Tab粘贴JD'); return; }
+            genCoverLoading.value = true;
+            try {
+                const r = await API.post('/api/resumes/cover-letter', {jd_text: jdText.value});
+                coverLetter.value = r.cover_letter;
+            } catch(e) { alert('生成失败: ' + e.message); }
+            genCoverLoading.value = false;
+        }
+
+        async function genInterview() {
+            if (!jdText.value.trim()) { alert('请先在「简历生成」Tab粘贴JD'); return; }
+            genIntvLoading.value = true;
+            try {
+                interviewQs.value = await API.post('/api/resumes/interview-questions', {jd_text: jdText.value});
+            } catch(e) { alert('生成失败: ' + e.message); }
+            genIntvLoading.value = false;
+        }
+
 
         function copyText(text) {
             navigator.clipboard.writeText(text).then(
@@ -311,12 +332,14 @@ createApp({
             basicInfo, modules, selfEval, pasteText, parsing, photoPreviewUrl,
             getPhotoUrl,
             saveBasicInfo, saveSelfEval, formatItem,
-            addingModule, newItemName, startAddItem, cancelAdd, confirmAddItem,
+            addingModule, startAddItem, cancelAdd, confirmAddItem,
             editingId, editFields, getFields, startEdit, cancelEdit, confirmEdit,
             deleteItem, loadExperiences,
             uploadPhoto, removePhoto, parseText,
             jdText, templateType, generating, result,
-            generateResume, exportFile, copyText,
+            generateResume, exportFile,
+            coverLetter, genCoverLoading, genCoverLetter,
+            interviewQs, genIntvLoading, genInterview, copyText,
         };
     }
 }).mount('#app');

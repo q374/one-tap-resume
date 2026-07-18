@@ -258,6 +258,59 @@ createApp({
         const generating = ref(false);
         const result = ref(null);
 
+        // JD分析
+        const jdAnalysis = ref(null);
+        const analyzingJD = ref(false);
+
+        async function analyzeJD() {
+            if (!jdText.value.trim()) return;
+            analyzingJD.value = true;
+            try {
+                jdAnalysis.value = await API.post('/api/jd/clean', {jd_text: jdText.value});
+            } catch(e) { alert('JD分析失败: ' + e.message); }
+            analyzingJD.value = false;
+        }
+
+        // 公司分析
+        const companyResult = ref(null);
+        const companyLoading = ref(false);
+
+        async function analyzeCompany() {
+            if (!jdText.value.trim()) return;
+            companyLoading.value = true;
+            companyResult.value = null;
+            try {
+                // 1. 从JD中提取公司名
+                const jdR = await API.post('/api/jd/clean', {jd_text: jdText.value});
+                const cn = jdR.company_name;
+                if (!cn) { alert('未从JD中识别到公司名称，请确认JD中包含公司信息'); companyLoading.value = false; return; }
+                // 2. AI分析公司
+                const r = await API.post('/api/company/analyze', {company_name: cn, jd_text: jdText.value});
+                r.company_name = cn;
+                companyResult.value = r;
+            } catch(e) { alert('公司分析失败: ' + e.message); }
+            companyLoading.value = false;
+        }
+
+        // 粘贴工商数据AI解读
+        const rawCompanyData = ref('');
+        const dataInterpretation = ref(null);
+        const interpreting = ref(false);
+
+        async function interpretData() {
+            if (!rawCompanyData.value.trim()) return;
+            interpreting.value = true;
+            dataInterpretation.value = null;
+            try {
+                const cn = companyResult.value ? companyResult.value.company_name : '';
+                dataInterpretation.value = await API.post('/api/company/interpret', {
+                    company_name: cn,
+                    raw_data: rawCompanyData.value,
+                });
+            } catch(e) { alert('解读失败: ' + e.message); }
+            interpreting.value = false;
+        }
+
         async function generateResume() {
             if (!jdText.value.trim()) { alert('请先粘贴目标岗位的JD'); return; }
             generating.value = true;
@@ -337,6 +390,9 @@ createApp({
             deleteItem, loadExperiences,
             uploadPhoto, removePhoto, parseText,
             jdText, templateType, generating, result,
+            jdAnalysis, analyzingJD, analyzeJD,
+            companyResult, companyLoading, analyzeCompany,
+            rawCompanyData, dataInterpretation, interpreting, interpretData,
             generateResume, exportFile,
             coverLetter, genCoverLoading, genCoverLetter,
             interviewQs, genIntvLoading, genInterview, copyText,

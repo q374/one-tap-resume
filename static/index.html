@@ -57,13 +57,13 @@
                 </div>
                 <div class="photo-actions">
                     <input type="file" accept="image/*" @change="uploadPhoto" ref="photoInput" style="display:none">
-                    <button @click="$refs.photoInput.click()" class="btn-secondary">
+                    <button @click="$refs.photoInput.click()" class="btn">
                         {{ basicInfo.photo_path ? '更换照片' : '📷 上传照片' }}
                     </button>
                     <span class="photo-hint">支持 JPG/PNG，建议一寸或二寸证件照</span>
                 </div>
             </div>
-            <button @click="saveBasicInfo" class="btn-primary">💾 保存基本信息</button>
+            <button @click="saveBasicInfo" class="btn btn-primary">💾 保存基本信息</button>
         </div>
 
         <!-- 各模块（教育/工作/项目/技能/获奖） -->
@@ -105,7 +105,7 @@
                     <button @click="cancelAdd" class="btn-small">取消</button>
                 </div>
             </div>
-            <button v-else @click="startAddItem(mod.key)" class="btn-primary">+ 添加{{ mod.label }}</button>
+            <button v-else @click="startAddItem(mod.key)" class="btn btn-primary">+ 添加{{ mod.label }}</button>
         </div>
 
         <!-- 自我评价 -->
@@ -113,7 +113,7 @@
             <h3>✍️ 自我评价</h3>
             <p class="field-hint">2-3句话概括你的核心优势，结合求职意向定制，避免空泛套话</p>
             <textarea v-model="selfEval.content" rows="4" placeholder="例：五年后端开发经验，主导过日均千万级请求的分布式系统架构设计。追求代码质量和系统稳定性，有良好的技术文档习惯和团队协作能力。"></textarea>
-            <button @click="saveSelfEval" class="btn-primary">💾 保存自我评价</button>
+            <button @click="saveSelfEval" class="btn btn-primary">💾 保存自我评价</button>
         </div>
 
         <!-- AI 智能导入 -->
@@ -145,7 +145,7 @@ ACM-ICPC亚洲区域赛 银奖 2022
 
 自我评价：
 热爱技术，有较强的自驱力和解决问题的能力"></textarea>
-            <button @click="parseText" class="btn-primary btn-large" :disabled="parsing">
+            <button @click="parseText" class="btn btn-primary" :disabled="parsing">
                 {{ parsing ? '⏳ AI 正在解析...' : '🤖 AI 解析并导入' }}
             </button>
             <p class="hint">💡 提示：AI导入后请逐模块检查，确保信息准确。竞赛/比赛获奖会归入「获奖情况」而非「技能」</p>
@@ -172,15 +172,86 @@ ACM-ICPC亚洲区域赛 银奖 2022
 2. 熟练使用MySQL、Redis等数据库
 3. 有分布式系统和微服务架构经验优先
 4. 良好的沟通能力和团队协作精神"></textarea>
-            <div class="row">
-                <label style="width:auto;margin:0">简历模板：</label>
-                <select v-model="templateType">
-                    <option value="default">项目经历优先（适合跨专业/转行）</option>
-                    <option value="education">教育背景优先（适合学历突出）</option>
+            <div class="btn-bar">
+                <select v-model="templateType" style="width:auto">
+                    <option value="default">项目经历优先</option>
+                    <option value="education">教育背景优先</option>
                 </select>
-                <button @click="generateResume" class="btn-primary btn-large" :disabled="generating">
-                    {{ generating ? '⏳ AI正在生成简历...' : '🚀 生成简历' }}
+                <button @click="analyzeJD" class="btn" :disabled="analyzingJD || !jdText.trim()">
+                    {{ analyzingJD ? '⏳' : '🔍' }} 分析JD
                 </button>
+                <button @click="analyzeCompany" class="btn btn-outline" :disabled="companyLoading || !jdText.trim()">
+                    {{ companyLoading ? '⏳ 分析中...' : '🏢 查公司' }}
+                </button>
+                <button @click="generateResume" class="btn btn-primary" :disabled="generating">
+                    {{ generating ? '⏳ 生成中' : '🚀 生成简历' }}
+                </button>
+            </div>
+
+            <!-- JD分析结果 -->
+            <div v-if="jdAnalysis" class="jd-analysis" style="position:relative">
+                <button @click="jdAnalysis = null" class="close-btn" title="关闭">✕</button>
+                <div class="jd-analysis-grid">
+                    <div v-if="jdAnalysis.job_title"><strong>岗位：</strong>{{ jdAnalysis.job_title }}</div>
+                    <div v-if="jdAnalysis.company_name"><strong>公司：</strong>{{ jdAnalysis.company_name }}</div>
+                </div>
+                <div v-if="jdAnalysis.hard_requirements && jdAnalysis.hard_requirements.length">
+                    <strong>硬性要求：</strong>
+                    <span v-for="r in jdAnalysis.hard_requirements" class="jd-tag jd-tag-hard">{{ r }}</span>
+                </div>
+                <div v-if="jdAnalysis.nice_to_have && jdAnalysis.nice_to_have.length">
+                    <strong>加分项：</strong>
+                    <span v-for="r in jdAnalysis.nice_to_have" class="jd-tag jd-tag-nice">{{ r }}</span>
+                </div>
+                <div v-if="jdAnalysis.job_summary"><strong>概要：</strong>{{ jdAnalysis.job_summary }}</div>
+            </div>
+
+            <!-- 公司分析结果 -->
+            <div v-if="companyResult" class="jd-analysis" style="background:#fffaf0;border-color:#f0d080;position:relative">
+                <button @click="companyResult = null" class="close-btn" title="关闭">✕</button>
+                <div><strong>🏢 {{ companyResult.company_name }}</strong></div>
+                <div v-if="companyResult.verdict" style="margin:4px 0">
+                    <span :class="'jd-tag ' + (companyResult.risk_level === 'low' ? 'jd-tag-nice' : companyResult.risk_level === 'high' ? 'jd-tag-hard' : '')">{{ companyResult.verdict }}</span>
+                </div>
+                <div v-if="companyResult.summary" class="jd-item">{{ companyResult.summary }}</div>
+                <div v-if="companyResult.advice" class="jd-item"><strong>💡 建议：</strong>{{ companyResult.advice }}</div>
+
+                <!-- 天眼查核实清单 -->
+                <div v-if="companyResult.checklist && companyResult.checklist.length" style="margin-top:8px;padding:8px;background:#fff;border-radius:4px">
+                    <strong>📋 建议去天眼查重点核实：</strong>
+                    <ol style="margin:4px 0 0 18px;font-size:13px">
+                        <li v-for="item in companyResult.checklist" :key="item" style="margin:2px 0">{{ item }}</li>
+                    </ol>
+                </div>
+                <div style="margin-top:6px;font-size:12px;color:#999">
+                    以上分析基于AI知识，仅供参考。
+                    <a :href="'https://www.tianyancha.com/search?key=' + encodeURIComponent(companyResult.company_name)" target="_blank">天眼查</a> ·
+                    <a :href="'https://aiqicha.baidu.com/s?q=' + encodeURIComponent(companyResult.company_name)" target="_blank">爱企查</a>
+                </div>
+
+                <!-- 粘贴工商数据解读 -->
+                <div style="margin-top:10px;padding-top:8px;border-top:1px dashed #e0d8c0">
+                    <p style="font-size:12px;color:#888;margin-bottom:6px">💡 去天眼查复制公司信息粘贴到这里，AI帮你解读</p>
+                    <textarea v-model="rawCompanyData" rows="3" style="font-size:12px" placeholder="粘贴从天眼查/爱企查复制的公司信息...&#10;例：注册资本500万，实缴资本0，参保人数3人，成立日期2021-03-15..."></textarea>
+                    <button @click="interpretData" class="btn btn-sm" :disabled="interpreting || !rawCompanyData.trim()" style="margin-top:4px">
+                        {{ interpreting ? '⏳ 解读中...' : '🔍 AI解读数据' }}
+                    </button>
+                </div>
+            </div>
+
+            <!-- AI解读结果 -->
+            <div v-if="dataInterpretation" class="jd-analysis" style="background:#f0faf0;border-color:#b0d8b0;position:relative">
+                <button @click="dataInterpretation = null" class="close-btn" title="关闭">✕</button>
+                <div><strong>📊 数据解读</strong></div>
+                <div v-if="dataInterpretation.analysis" class="jd-item" style="margin-top:4px">{{ dataInterpretation.analysis }}</div>
+                <div v-if="dataInterpretation.positive_signals && dataInterpretation.positive_signals.length" class="jd-item">
+                    <strong>✅ 积极信号：</strong>{{ dataInterpretation.positive_signals.join('；') }}
+                </div>
+                <div v-if="dataInterpretation.risk_signals && dataInterpretation.risk_signals.length" class="jd-item">
+                    <strong>⚠️ 风险信号：</strong>{{ dataInterpretation.risk_signals.join('；') }}
+                </div>
+                <div v-if="dataInterpretation.verdict" class="jd-item"><strong>🏷 {{ dataInterpretation.verdict }}</strong></div>
+                <div v-if="dataInterpretation.action" class="jd-item">{{ dataInterpretation.action }}</div>
             </div>
             <p class="hint">💡 提示：生成前请确保「经历管理」中已录入你的基本信息、教育、项目等经历</p>
         </div>
@@ -194,7 +265,7 @@ ACM-ICPC亚洲区域赛 银奖 2022
             <div class="card">
                 <h3>📄 简历预览</h3>
                 <div class="toolbar">
-                    <button @click="exportFile" class="btn-primary">🖨 打印 / 导出PDF</button>
+                    <button @click="exportFile" class="btn btn-primary">🖨 打印 / 导出PDF</button>
                     <span class="hint">在打印对话框中选择「另存为PDF」即可导出</span>
                 </div>
                 <iframe :srcdoc="result.resume_html" class="resume-iframe" id="resumeFrame"></iframe>
@@ -212,22 +283,24 @@ ACM-ICPC亚洲区域赛 银奖 2022
         <div class="card">
             <h3>📝 求职信</h3>
             <p class="field-hint">AI根据你的经历和JD，写一段200-300字的求职信/自我介绍，说明你为什么适合这个岗位</p>
-            <button @click="genCoverLetter" class="btn-primary" :disabled="genCoverLoading || !jdText.trim()">
+            <button @click="genCoverLetter" class="btn btn-primary" :disabled="genCoverLoading || !jdText.trim()">
                 {{ genCoverLoading ? '⏳ 生成中...' : '🤖 生成求职信' }}
             </button>
-            <div v-if="coverLetter" class="result-box" style="margin-top:12px">
+            <div v-if="coverLetter" class="result-box" style="margin-top:12px;position:relative">
+                <button @click="coverLetter = ''" class="close-btn" title="关闭">✕</button>
                 <div class="cover-letter-text">{{ coverLetter }}</div>
-                <button @click="copyText(coverLetter)" class="btn-secondary" style="margin-top:8px">📋 复制</button>
+                <button @click="copyText(coverLetter)" class="btn" style="margin-top:8px">📋 复制</button>
             </div>
         </div>
 
         <div class="card">
             <h3>🎤 模拟面试题</h3>
             <p class="field-hint">AI基于JD和你的项目经历，生成8-10道面试题，分技术题、项目深挖、行为题三类</p>
-            <button @click="genInterview" class="btn-primary" :disabled="genIntvLoading || !jdText.trim()">
+            <button @click="genInterview" class="btn btn-primary" :disabled="genIntvLoading || !jdText.trim()">
                 {{ genIntvLoading ? '⏳ 生成中...' : '🤖 生成面试题' }}
             </button>
-            <div v-if="interviewQs" class="interview-section">
+            <div v-if="interviewQs" class="interview-section" style="position:relative">
+                <button @click="interviewQs = null" class="close-btn" title="关闭">✕</button>
                 <div v-if="interviewQs.tech_questions && interviewQs.tech_questions.length" style="margin-top:12px">
                     <h4>🔧 技术题</h4>
                     <ol><li v-for="q in interviewQs.tech_questions" :key="q.question">{{ q.question }} <small>— {{ q.purpose }}</small></li></ol>

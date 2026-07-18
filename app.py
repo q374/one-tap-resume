@@ -307,6 +307,79 @@ async def generate_interview_questions(req: ExtraRequest):
     result = await interview_service.generate(exp_data["text"], req.jd_text)
     return result
 
+# ==================== 公司分析 ====================
+
+class CompanyAnalyzeRequest(BaseModel):
+    company_name: str
+    jd_text: str = ""
+
+@app.post("/api/company/analyze")
+async def analyze_company(req: CompanyAnalyzeRequest):
+    """AI 分析公司，给出求职建议"""
+    prompt = f"""你是求职顾问。分析以下公司，给出求职者角度的建议。
+
+公司名称：{req.company_name}
+招聘JD：{req.jd_text}
+
+请基于你了解的公开信息分析这家公司。如果没听说过，诚实说数据不足。
+
+然后告诉用户去天眼查查哪些关键数据，**并且教用户怎么判断这些数据是好是坏**。每条 checklist 都要包含：查什么 + 判断标准。
+
+例如：
+- "查看注册资本，如果低于100万且实缴资本为0，说明公司资金实力弱，可能是空壳"
+- "查看参保人数，如果为0或个位数而JD写着大规模团队，可能虚假宣传"
+- "查看成立日期，如果不满1年且无知名投资方，稳定性风险较高"
+
+以JSON返回：
+{{
+    "summary": "公司基本情况",
+    "risk_level": "low/medium/high/unknown",
+    "risks": ["风险点"],
+    "positives": ["正面因素"],
+    "advice": "建议",
+    "verdict": "整体靠谱可投 / 有风险建议了解 / 数据不足无法判断",
+    "checklist": ["查什么+判断标准", ...]
+}}"""
+    try:
+        result = await call_deepseek_json(prompt)
+        return result
+    except Exception:
+        return {"verdict": "数据不足，无法判断", "risk_level": "unknown", "advice": "AI分析暂不可用，建议通过天眼查等平台查询"}
+
+class CompanyDataInput(BaseModel):
+    company_name: str = ""
+    raw_data: str  # 用户粘贴的工商数据
+
+@app.post("/api/company/interpret")
+async def interpret_company_data(req: CompanyDataInput):
+    """用户粘贴天眼查原始数据，AI解读"""
+    prompt = f"""你是求职顾问，帮求职者解读公司的工商数据，用通俗语言解释这些数据代表什么、有哪些风险。
+
+公司：{req.company_name}
+用户粘贴的工商数据：
+{req.raw_data}
+
+请用通俗语言解读以下方面（如果数据中有的话）：
+1. 注册资本和实缴资本 — 数字代表什么？实缴低说明什么？
+2. 参保人数 — 这个数字说明公司真实规模如何？
+3. 成立日期 — 公司处于什么阶段？稳定性如何？
+4. 经营异常/行政处罚/法律诉讼 — 严重吗？对求职者有什么影响？
+5. 股东/法人变更 — 频繁变更是好是坏？
+
+以JSON返回：
+{{
+    "analysis": "整体解读（200字内）",
+    "risk_signals": ["具体风险信号"],
+    "positive_signals": ["积极信号"],
+    "verdict": "综合来看靠谱 / 有风险需谨慎 / 数据异常建议避开",
+    "action": "给求职者的下一步建议"
+}}"""
+    try:
+        result = await call_deepseek_json(prompt)
+        return result
+    except Exception:
+        return {"verdict": "无法分析", "action": "请确认粘贴的数据格式正确"}
+
 # ==================== Template Routes ====================
 
 @app.get("/api/templates")

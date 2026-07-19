@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>{{姓名}} - 个人简历</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: #f5f2ed;
+    display: flex; justify-content: center; padding: 20px;
+}
+.page {
+    width: 794px; min-height: 1123px;
+    background: #fff;
+    display: flex;
+    box-shadow: 0 2px 20px rgba(0,0,0,0.1);
+}
+
+/* ===== 左侧栏 ===== */
+.sidebar {
+    width: 220px; min-height: 100%;
+    background: linear-gradient(180deg, #3d3547 0%, #4a3f56 50%, #5c4f6a 100%);
+    color: #e8e0d8;
+    padding: 36px 20px 30px 24px;
+    position: relative;
+    overflow: hidden;
+}
+.sidebar::after {
+    content: ''; position: absolute; top: 0; right: 0; bottom: 0;
+    width: 3px; background: #b79b8b;
+}
+.sidebar .name {
+    font-size: 24px; font-weight: 700; letter-spacing: 2px;
+    margin-bottom: 4px; color: #fff;
+}
+.sidebar .title {
+    font-size: 12px; color: #b79b8b; letter-spacing: 1px;
+    margin-bottom: 24px; text-transform: uppercase;
+}
+.sidebar .section-title {
+    font-size: 11px; font-weight: 700; letter-spacing: 2px;
+    color: #b79b8b; margin: 18px 0 8px;
+    padding-bottom: 4px; border-bottom: 1px solid rgba(183,155,139,0.3);
+    text-transform: uppercase;
+}
+.sidebar .info-item {
+    font-size: 11px; line-height: 1.8; color: #c8c0b8;
+}
+.sidebar .info-item strong { color: #e8e0d8; font-weight: 500; }
+
+/* ===== 右侧主内容 ===== */
+.main {
+    flex: 1; padding: 36px 32px 30px 30px;
+    background: #fffdf9;
+}
+.main h2 {
+    font-size: 14px; font-weight: 700; letter-spacing: 1px;
+    color: #4a3f56; margin: 20px 0 10px; padding-bottom: 4px;
+    border-bottom: 2px solid #b79b8b;
+    display: inline-block;
+}
+.main .item { margin-bottom: 12px; }
+.main .item-title {
+    font-size: 13px; font-weight: 700; color: #3d3547;
+    display: flex; justify-content: space-between; align-items: baseline;
+}
+.main .item-date { font-size: 11px; color: #999; font-weight: 400; white-space: nowrap; }
+.main .item-sub { font-size: 11px; color: #888; margin-top: 2px; }
+.main .item-desc { font-size: 12px; color: #555; line-height: 1.7; margin-top: 4px; }
+
+/* 技能标签 */
+.skill-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.skill-tag {
+    font-size: 11px; padding: 3px 10px;
+    background: #f0ebe3; color: #4a3f56;
+    border-radius: 2px; border: 1px solid #e0d8cc;
+}
+
+/* 打印样式 */
+@media print {
+    body { background: #fff; padding: 0; }
+    .page { box-shadow: none; width: 100%; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+    <!-- ===== 左侧个人信息栏 ===== -->
+    <div class="sidebar">
+        <div class="name">{{姓名}}</div>
+        <div class="title">{{求职意向}}</div>
+
+        <div class="section-title">联系方式</div>
+        <div class="info-item"><strong>电话</strong><br>{{电话}}</div>
+        <div class="info-item" style="margin-top:6px"><strong>邮箱</strong><br>{{邮箱}}</div>
+        <div class="info-item" style="margin-top:6px"><strong>年龄</strong><br>{{年龄}}岁</div>
+
+        <div class="section-title">基本信息</div>
+        <div class="info-item">{{基本信息1}}</div>
+        <div class="info-item" style="margin-top:4px">{{基本信息2}}</div>
+        <div class="info-item" style="margin-top:4px">{{基本信息3}}</div>
+
+        <div class="section-title">兴趣爱好</div>
+        <div class="info-item">{{兴趣爱好}}</div>
+    </div>
+
+    <!-- ===== 右侧主内容区 ===== -->
+    <div class="main">
+        <h2>项目经历</h2>
+        <div class="item">
+            <div class="item-title">
+                <span>{{项目名称1}}</span>
+                <span class="item-date">{{项目时间1}}</span>
+            </div>
+            <div class="item-sub">{{项目角色1}}</div>
+            <div class="item-desc">{{项目描述1}}</div>
+        </div>
+        <div class="item">
+            <div class="item-title">
+                <span>{{项目名称2}}</span>
+                <span class="item-date">{{项目时间2}}</span>
+            </div>
+            <div class="item-sub">{{项目角色2}}</div>
+            <div class="item-desc">{{项目描述2}}</div>
+        </div>
+
+        <h2>教育背景</h2>
+        <div class="item">
+            <div class="item-title">
+                <span>{{学校名称}}</span>
+                <span class="item-date">{{入学时间}} - {{毕业时间}}</span>
+            </div>
+            <div class="item-sub">{{专业}} · {{学历}}</div>
+        </div>
+
+        <h2>专业技能</h2>
+        <div class="skill-tags">{{技能列表}}</div>
+
+        {{自定义模块}}
+
+        <h2>自我评价</h2>
+        <div class="item-desc">{{自我评价}}</div>
+    </div>
+
+</div>
+</body>
+</html>

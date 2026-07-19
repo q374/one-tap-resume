@@ -29,6 +29,8 @@ from services.ocr_service import ocr_service
 from services.export_service import export_service
 from services.cover_letter_service import cover_letter_service
 from services.interview_service import interview_service
+from services.revise_service import revise_service
+from services.template_converter import convert_to_html
 from prompts.experience_parse import EXPERIENCE_PARSE_PROMPT
 from prompts.dedup import DEDUP_PROMPT
 
@@ -395,6 +397,43 @@ async def upload_template(data: TemplateUploadInput):
     result = await template_service.upload_template(data.name, data.html_content)
     return result
 
+
+@app.post("/api/templates/import-file")
+async def import_template_file(file: UploadFile = File(...)):
+    """导入模板文件 — 支持 HTML/Word/PDF，自动转换为 HTML 后保存"""
+    import aiofiles
+
+    filename = file.filename or "template"
+    ext = filename.lower().rsplit('.', 1)[-1] if '.' in filename else ''
+
+    # 读取文件内容
+    content = await file.read()
+
+    if ext in ('html', 'htm'):
+        # 直接使用 HTML 内容
+        try:
+            html_content = content.decode('utf-8')
+        except UnicodeDecodeError:
+            html_content = content.decode('gbk', errors='replace')
+        name = filename.rsplit('.', 1)[0]
+    elif ext in ('docx', 'doc', 'pdf'):
+        # 转换 Word/PDF 为 HTML
+        try:
+            html_content = convert_to_html(content, filename)
+        except RuntimeError as e:
+            raise HTTPException(500, str(e))
+        except Exception as e:
+            raise HTTPException(500, f"文件转换失败: {str(e)}")
+        name = filename.rsplit('.', 1)[0]
+    else:
+        raise HTTPException(400, f"不支持的文件格式: .{ext}，支持 .html / .docx / .pdf")
+
+    if not html_content or not html_content.strip():
+        raise HTTPException(400, "转换后的模板内容为空")
+
+    result = await template_service.upload_template(name, html_content)
+    return result
+
 @app.delete("/api/templates/{template_id}")
 async def delete_template(template_id: int):
     template_service.delete_template(template_id)
@@ -491,6 +530,35 @@ async def ai_modify(data: ModifyRequest):
 直接输出替换选中段落后应该写入的新文本。保持相似的篇幅和格式。"""
     result = await call_deepseek(prompt, max_tokens=1024)
     return {"modified_text": result}
+
+# ==================== AI Revise Routes ====================
+
+class ReviseRequest(BaseModel):
+    current_html: str
+    instruction: str
+
+@app.post("/api/resumes/revise")
+async def revise_resume(data: ReviseRequest):
+    """AI修改简历 - 完整HTML diff模式，CSS/图片格式保护"""
+    revised_html, message = await revise_service.revise(
+        data.current_html, data.instruction
+    )
+    if revised_html is None:
+        raise HTTPException(500, message)
+    return {"success": True, "revised_html": revised_html, "message": message}
+
+
+class AcceptRevisionRequest(BaseModel):
+    html_content: str
+
+@app.post("/api/resumes/accept-revision")
+async def accept_revision(data: AcceptRevisionRequest):
+    """接受修改 - 清除del/ins标记，返回干净的HTML"""
+    clean_html = revise_service.accept(data.html_content)
+    if clean_html is None:
+        raise HTTPException(400, "HTML内容为空")
+    return {"success": True, "clean_html": clean_html}
+
 
 if __name__ == "__main__":
     uvicorn.run("app:app", host="127.0.0.1", port=8765, reload=True)

@@ -255,6 +255,11 @@ createApp({
         // ======== 简历生成 ========
         const jdText = ref('');
         const templateType = ref('default');
+        const tplFileInput = ref(null);
+        const templateList = ref([
+            {id: 'default', name: '📋 项目经历优先（默认）'},
+            {id: 'education', name: '🎓 教育背景优先'},
+        ]);
         const generating = ref(false);
         const result = ref(null);
 
@@ -327,6 +332,184 @@ createApp({
             generating.value = false;
         }
 
+        // 加载模板列表
+        async function loadTemplates() {
+            try {
+                const data = await API.get('/api/templates');
+                // 保持前两个内置模板不变，追加自定义模板
+                const builtins = [
+                    {id: 'default', name: '📋 项目经历优先（默认）', is_builtin: true},
+                    {id: 'education', name: '🎓 教育背景优先', is_builtin: true},
+                ];
+                const customs = data.filter(t => !t.is_builtin).map(t => ({
+                    id: String(t.id),
+                    name: '📁 ' + t.name,
+                    is_builtin: false,
+                }));
+                templateList.value = [...builtins, ...customs];
+            } catch(e) {
+                console.error('加载模板列表失败:', e);
+            }
+        }
+
+        // 自定义下拉框状态
+        const tplDropdownOpen = ref(false);
+        function toggleTplDropdown() {
+            tplDropdownOpen.value = !tplDropdownOpen.value;
+        }
+
+        // 在下拉框内删除指定模板
+        async function deleteTemplateById(tid) {
+            if (!confirm('确定要删除这个模板吗？')) return;
+            try {
+                await API.del('/api/templates/' + tid);
+                if (templateType.value === String(tid)) {
+                    templateType.value = 'default';
+                }
+                await loadTemplates();
+            } catch(e) {
+                alert('删除失败: ' + e.message);
+            }
+        }
+
+        // 删除当前选中的自定义模板
+        async function deleteSelectedTemplate() {
+            const tid = templateType.value;
+            if (!tid || tid === 'default' || tid === 'education') return;
+
+            if (!confirm('确定要删除这个模板吗？此操作不可恢复。')) return;
+
+            try {
+                await API.del('/api/templates/' + tid);
+                templateType.value = 'default';
+                await loadTemplates();
+            } catch(e) {
+                alert('删除失败: ' + e.message);
+            }
+        }
+
+        // 导入自定义模板
+        async function importTemplate(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const name = file.name.toLowerCase();
+            const validExts = ['.html', '.htm', '.docx', '.doc', '.pdf'];
+            if (!validExts.some(ext => name.endsWith(ext))) {
+                alert('只支持 HTML(.html) / Word(.docx) / PDF 格式');
+                event.target.value = '';
+                return;
+            }
+
+            const isHtml = name.endsWith('.html') || name.endsWith('.htm');
+
+            if (!isHtml) {
+                const ok = confirm(
+                    '⚠️ 注意：Word/PDF 模板可能无法完美保留颜色和排版。\n\n' +
+                    '推荐使用 HTML 格式的模板（效果最好，格式100%保留）。\n\n' +
+                    '你可以：\n' +
+                    '1. 用 Word 打开模板 → 另存为 → 网页(.html)\n' +
+                    '2. 或使用内置模板修改\n\n' +
+                    '是否继续导入此 Word/PDF 文件？'
+                );
+                if (!ok) { event.target.value = ''; return; }
+            }
+
+            if (file.size > 10 * 1024 * 1024) {
+                alert('文件大小不能超过 10MB');
+                event.target.value = '';
+                return;
+            }
+
+            try {
+                // 通过 FormData 上传文件，服务端自动识别格式并转换
+                const formData = new FormData();
+                formData.append('file', file);
+
+                const r = await fetch('/api/templates/import-file', {
+                    method: 'POST',
+                    body: formData,
+                });
+                if (!r.ok) {
+                    const err = await r.json();
+                    throw new Error(err.detail || '上传失败');
+                }
+                const result = await r.json();
+
+                // 刷新模板列表
+                await loadTemplates();
+
+                // 自动选中刚导入的模板
+                if (result.id) {
+                    templateType.value = String(result.id);
+                }
+
+                const extLabel = name.endsWith('.pdf') ? 'PDF' : name.endsWith('.docx') || name.endsWith('.doc') ? 'Word' : 'HTML';
+                alert(`模板导入成功（${extLabel} → HTML）：` + file.name);
+            } catch (e) {
+                alert('模板导入失败：' + e.message);
+            }
+            event.target.value = '';
+        }
+
+        // ======== AI简历修改 ========
+        const reviseInstruction = ref('');
+        const revising = ref(false);
+        const hasRevision = ref(false);
+        const reviseError = ref('');
+        const previousResumeHtml = ref('');
+
+        async function sendRevise() {
+            if (!reviseInstruction.value.trim()) return;
+            if (!result.value || !result.value.resume_html) {
+                reviseError.value = '请先生成简历';
+                return;
+            }
+            revising.value = true;
+            reviseError.value = '';
+            hasRevision.value = false;
+            try {
+                const currentHtml = result.value.resume_html;
+                const r = await API.post('/api/resumes/revise', {
+                    current_html: currentHtml,
+                    instruction: reviseInstruction.value.trim(),
+                });
+                previousResumeHtml.value = currentHtml;
+                result.value.resume_html = r.revised_html;
+                hasRevision.value = true;
+                reviseInstruction.value = '';
+            } catch(e) {
+                reviseError.value = '修改失败: ' + e.message;
+            }
+            revising.value = false;
+        }
+
+        async function acceptRevision() {
+            if (!result.value || !result.value.resume_html) return;
+            try {
+                const r = await API.post('/api/resumes/accept-revision', {
+                    html_content: result.value.resume_html,
+                });
+                result.value.resume_html = r.clean_html;
+                hasRevision.value = false;
+                previousResumeHtml.value = '';
+                reviseInstruction.value = '';
+                reviseError.value = '';
+            } catch(e) {
+                reviseError.value = '接受修改失败: ' + e.message;
+            }
+        }
+
+        function rejectRevision() {
+            if (previousResumeHtml.value) {
+                result.value.resume_html = previousResumeHtml.value;
+                previousResumeHtml.value = '';
+                hasRevision.value = false;
+                reviseInstruction.value = '';
+                reviseError.value = '';
+            }
+        }
+
         async function exportFile() {
             if (!result.value || !result.value.resume_html) {
                 alert('请先生成简历'); return;
@@ -378,6 +561,13 @@ createApp({
         // ======== 初始化 ========
         onMounted(async () => {
             await loadExperiences();
+            await loadTemplates();
+            // 点击外部关闭自定义下拉
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.custom-select')) {
+                    tplDropdownOpen.value = false;
+                }
+            });
         });
 
         return {
@@ -389,11 +579,14 @@ createApp({
             editingId, editFields, getFields, startEdit, cancelEdit, confirmEdit,
             deleteItem, loadExperiences,
             uploadPhoto, removePhoto, parseText,
-            jdText, templateType, generating, result,
+            jdText, templateType, tplFileInput, templateList, generating, result,
+            toggleTplDropdown, tplDropdownOpen, deleteTemplateById, deleteSelectedTemplate,
             jdAnalysis, analyzingJD, analyzeJD,
             companyResult, companyLoading, analyzeCompany,
             rawCompanyData, dataInterpretation, interpreting, interpretData,
             generateResume, exportFile,
+            reviseInstruction, revising, hasRevision, reviseError,
+            sendRevise, acceptRevision, rejectRevision,
             coverLetter, genCoverLoading, genCoverLetter,
             interviewQs, genIntvLoading, genInterview, copyText,
         };

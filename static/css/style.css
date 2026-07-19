@@ -134,6 +134,51 @@ small { color: #999; }
 .result-box { margin-top: 16px; padding: 16px; background: #f8fff8; border: 1px solid #d4edda; border-radius: 4px; }
 .modified-text { white-space: pre-wrap; padding: 12px; background: #fff; border: 1px solid #eee; border-radius: 4px; margin: 8px 0; line-height: 1.8; font-size: 14px; }
 
+/* 自定义模板下拉框 */
+.custom-select { position: relative; width: 280px; display: inline-block; }
+.custom-select-trigger {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;
+    background: #fff; cursor: pointer; font-size: 14px; user-select: none;
+}
+.custom-select-trigger:hover { border-color: #1a73e8; }
+.custom-select-trigger .arrow { font-size: 10px; color: #999; transition: transform 0.2s; }
+.custom-select.open .custom-select-trigger .arrow { transform: rotate(180deg); }
+.custom-select.open .custom-select-trigger { border-color: #1a73e8; box-shadow: 0 0 0 2px rgba(26,115,232,0.1); }
+
+.custom-select-options {
+    position: absolute; top: 100%; left: 0; right: 0; z-index: 200;
+    background: #fff; border: 1px solid #ddd; border-radius: 4px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12); max-height: 320px; overflow-y: auto;
+    margin-top: 2px;
+}
+.custom-option {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 12px; font-size: 14px; cursor: pointer;
+    border-bottom: 1px solid #f5f5f5;
+}
+.custom-option:hover { background: #e8f0fe; }
+.custom-option.selected { background: #e8f0fe; color: #1a73e8; font-weight: 500; }
+.custom-option .btn-delete-x {
+    width: 22px; height: 22px; border: none; background: transparent;
+    color: #ccc; cursor: pointer; border-radius: 3px; font-size: 14px;
+    line-height: 22px; text-align: center; flex-shrink: 0;
+}
+.custom-option .btn-delete-x:hover { background: #ef4444; color: #fff; }
+.custom-option.disabled-option {
+    color: #999; cursor: default; font-size: 13px; background: #fafafa;
+    border-bottom: none; justify-content: center;
+}
+.custom-option.disabled-option:hover { background: #fafafa; }
+
+/* 点击外部关闭下拉 */
+body { min-height: 100vh; }
+
+/* AI修改面板 */
+.revise-input-row { display: flex; gap: 12px; align-items: center; }
+.revise-input { flex: 1; padding: 10px 14px !important; border: 2px solid #e0e0e0 !important; border-radius: 6px !important; font-size: 14px !important; transition: border-color 0.2s; }
+.revise-input:focus { border-color: #1a73e8 !important; outline: none; box-shadow: 0 0 0 3px rgba(26,115,232,0.1); }
+
 /* 打印 */
 @media print {
     .tab-bar, .toolbar, .btn-primary, .btn-secondary, .btn-small,

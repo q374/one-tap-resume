@@ -4,6 +4,7 @@ import base64
 from core.deepseek_client import call_deepseek
 from prompts.resume_generation import build_resume_prompt
 from services.html_cleaner import clean_html_response, validate_html, validate_content_authenticity
+from services.template_filler import fill_custom_template
 from config import BASE_DIR
 
 PHOTO_MARKER = '__PHOTO_BASE64__'
@@ -46,19 +47,32 @@ class ResumeService:
         else:
             photo_directive = '照片未提供，请将照片区域保持为<span class="editable-placeholder" contenteditable="true">请上传照片</span>。'
 
-        prompt = build_resume_prompt(
-            template_html=template_html,
-            experience_text=experience_text,
-            jd_text=jd_text,
-            age_directive=age_directive,
-            photo_directive=photo_directive,
-        )
+        # 检测是否为自定义模板（无 {{}} 占位符，如 Word/PDF 导入的）
+        has_placeholders = '{{' in template_html
 
-        html_content = await call_deepseek(prompt, max_tokens=16384)
-        if not html_content:
-            return {"html": None, "valid": False, "issues": ["API调用失败"]}
+        if not has_placeholders:
+            # 自定义模板：用 filler 管道（AI只出文本，代码负责拼回HTML）
+            html_content = await fill_custom_template(
+                template_html, experience_text, jd_text
+            )
+            if not html_content:
+                return {"html": None, "valid": False, "issues": ["模板填充失败"]}
+        else:
+            # 内置模板：用传统 prompt 方式
+            prompt = build_resume_prompt(
+                template_html=template_html,
+                experience_text=experience_text,
+                jd_text=jd_text,
+                age_directive=age_directive,
+                photo_directive=photo_directive,
+                has_placeholders=True,
+            )
 
-        html_content = clean_html_response(html_content)
+            html_content = await call_deepseek(prompt, max_tokens=16384)
+            if not html_content:
+                return {"html": None, "valid": False, "issues": ["API调用失败"]}
+
+            html_content = clean_html_response(html_content)
 
         # 后处理：用真实 base64 替换占位符
         if photo_base64 and PHOTO_MARKER in html_content:

@@ -174,8 +174,9 @@ ACM-ICPC亚洲区域赛 银奖 2022
 4. 良好的沟通能力和团队协作精神"></textarea>
             <div class="btn-bar">
                 <select v-model="templateType" style="width:auto">
-                    <option value="default">项目经历优先</option>
-                    <option value="education">教育背景优先</option>
+                    <option v-for="t in templateList" :key="t.id" :value="String(t.id)">
+                        {{ t.name }}
+                    </option>
                 </select>
                 <button @click="analyzeJD" class="btn" :disabled="analyzingJD || !jdText.trim()">
                     {{ analyzingJD ? '⏳' : '🔍' }} 分析JD
@@ -269,6 +270,27 @@ ACM-ICPC亚洲区域赛 银奖 2022
                     <span class="hint">在打印对话框中选择「另存为PDF」即可导出</span>
                 </div>
                 <iframe :srcdoc="result.resume_html" class="resume-iframe" id="resumeFrame"></iframe>
+            </div>
+
+            <!-- AI修改面板 -->
+            <div class="card" style="margin-top:16px">
+                <h3>✏️ AI辅助修改</h3>
+                <p class="field-hint">对生成的简历不满意？输入修改要求，AI帮你改。<br>
+                <span style="color:#991b1b;background:#fecaca;padding:1px 6px;border-radius:3px">红色背景</span> = 旧内容 &nbsp;
+                <span style="color:#166534;background:#bbf7d0;padding:1px 6px;border-radius:3px;font-weight:bold">绿色背景</span> = 新内容</p>
+                <div class="revise-input-row">
+                    <input v-model="reviseInstruction" placeholder="例：把项目经历写得更量化一些 / 把自我评价缩短到两句话"
+                           @keyup.enter="sendRevise" class="revise-input">
+                    <button @click="sendRevise" class="btn btn-primary" :disabled="revising || !reviseInstruction.trim()">
+                        {{ revising ? '⏳ AI修改中...' : '🤖 AI修改' }}
+                    </button>
+                </div>
+                <div v-if="reviseError" class="toast toast-error" style="margin-top:8px;padding:8px 12px;border-radius:6px;background:#fee2e2;color:#dc2626">{{ reviseError }}</div>
+                <div v-if="hasRevision" class="btn-group" style="margin-top:12px;justify-content:center">
+                    <button @click="acceptRevision" class="btn btn-primary">✅ 接受修改</button>
+                    <button @click="rejectRevision" class="btn btn-error">❌ 撤销修改</button>
+                    <span class="hint" style="margin-left:8px">接受后标记清除，可继续修改</span>
+                </div>
             </div>
 
         </div>

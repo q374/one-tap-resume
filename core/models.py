@@ -167,6 +167,12 @@ class ResumeRecord:
     interview_questions: str = ""
     company_analysis: str = ""
     created_at: str = ""
+    company_name: str = ""
+    job_title: str = ""
+    is_delivered: int = 0
+    delivery_time: str = ""
+    delivery_url: str = ""
+    delivery_status: str = "pending"
 
     def to_dict(self):
         d = asdict(self)
@@ -176,4 +182,30 @@ class ResumeRecord:
     def from_row(cls, row):
         if row is None:
             return cls()
-        return cls(**{k: row[k] for k in cls.__dataclass_fields__})
+        return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k in row.keys()})
+
+
+@dataclass
+class InterviewSession:
+    id: Optional[int] = None
+    session_id: str = ""
+    status: str = "active"
+    basic_info_json: str = "{}"
+    jd_text: str = ""
+    experience_text: str = ""
+    questions_json: str = "[]"
+    current_question_index: int = 0
+    chat_history_json: str = "[]"
+    evaluation_json: str = ""
+    started_at: str = ""
+    ended_at: str = ""
+
+    def to_dict(self):
+        d = asdict(self)
+        return d
+
+    @classmethod
+    def from_row(cls, row):
+        if row is None:
+            return cls()
+        return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k in row.keys()})

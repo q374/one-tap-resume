@@ -12,7 +12,7 @@
     <nav class="tab-bar">
         <button v-for="tab in tabs" :key="tab.id"
                 :class="{active: currentTab === tab.id}"
-                @click="currentTab = tab.id">{{ tab.label }}</button>
+                @click="switchTab(tab.id)">{{ tab.label }}</button>
     </nav>
 
     <!-- ======== Tab1: 经历管理 ======== -->
@@ -116,17 +116,21 @@
             <button @click="saveSelfEval" class="btn btn-primary">💾 保存自我评价</button>
         </div>
 
-        <!-- AI 智能导入 -->
+    </section>
+
+    <!-- ======== Tab1: AI智能导入 ======== -->
+    <section v-show="currentTab === 'import'" class="tab-content">
+        <h2>🤖 AI 智能导入</h2>
+        <p class="section-desc">把整份简历草稿粘贴进来，AI 自动识别并导入到经历管理</p>
         <div class="card highlight-card">
-            <h3>🤖 AI 智能导入（推荐）</h3>
-            <p class="field-hint">把整份简历草稿粘贴进来，AI 会自动识别并填入上面的各个模块。支持识别：基本信息、教育、工作/实习经历、项目、技能、获奖、自我评价</p>
-            <textarea v-model="pasteText" rows="10" placeholder="示例：
+            <h3>📋 粘贴简历草稿</h3>
+            <p class="field-hint">支持识别：基本信息、教育、工作/实习经历、项目、技能、获奖、自我评价</p>
+            <textarea v-model="pasteText" rows="12" placeholder="示例：
 姓名：张三 | 电话：13800138000 | 邮箱：zhangsan@email.com
 年龄：25 | 求职意向：Python后端开发
 
 教育背景：
 清华大学 计算机科学与技术 硕士 2020.09-2023.06
-华中科技大学 软件工程 本科 2016.09-2020.06
 
 工作经历：
 字节跳动 后端开发工程师 2023.07-至今
@@ -137,18 +141,17 @@
 使用Python FastAPI + PostgreSQL，实现了订单管理和支付模块...
 
 技能：
-Python（精通，独立完成3个商业项目后端）、Go（熟练）、Docker、Kubernetes
+Python（精通，独立完成3个商业项目后端）、Go（熟练）、Docker
 
 获奖情况：
 ACM-ICPC亚洲区域赛 银奖 2022
-校级优秀毕业生 2023
 
 自我评价：
 热爱技术，有较强的自驱力和解决问题的能力"></textarea>
-            <button @click="parseText" class="btn btn-primary" :disabled="parsing">
+            <button @click="parseText" class="btn btn-primary" :disabled="parsing" style="margin-top:8px">
                 {{ parsing ? '⏳ AI 正在解析...' : '🤖 AI 解析并导入' }}
             </button>
-            <p class="hint">💡 提示：AI导入后请逐模块检查，确保信息准确。竞赛/比赛获奖会归入「获奖情况」而非「技能」</p>
+            <p class="hint">💡 提示：AI导入后请切换到「经历管理」Tab逐模块检查，确保信息准确</p>
         </div>
     </section>
 
@@ -181,8 +184,11 @@ ACM-ICPC亚洲区域赛 银奖 2022
                 <button @click="analyzeJD" class="btn" :disabled="analyzingJD || !jdText.trim()">
                     {{ analyzingJD ? '⏳' : '🔍' }} 分析JD
                 </button>
-                <button @click="analyzeCompany" class="btn btn-outline" :disabled="companyLoading || !jdText.trim()">
-                    {{ companyLoading ? '⏳ 分析中...' : '🏢 查公司' }}
+                <button @click="quickAnalyzeCompany" class="btn btn-outline" :disabled="companyLoading || !jdText.trim()">
+                    {{ companyLoading ? '⏳' : '⚡' }} 快速分析
+                </button>
+                <button @click="jumpToCompanyTab" class="btn btn-outline" :disabled="!jdText.trim()" title="跳转到公司洞察Tab，生成6模块深度报告">
+                    🏢 深度洞察
                 </button>
                 <button @click="generateResume" class="btn btn-primary" :disabled="generating">
                     {{ generating ? '⏳ 生成中' : '🚀 生成简历' }}
@@ -207,7 +213,7 @@ ACM-ICPC亚洲区域赛 银奖 2022
                 <div v-if="jdAnalysis.job_summary"><strong>概要：</strong>{{ jdAnalysis.job_summary }}</div>
             </div>
 
-            <!-- 公司分析结果 -->
+            <!-- 快速公司分析结果（完整版） -->
             <div v-if="companyResult" class="jd-analysis" style="background:#fffaf0;border-color:#f0d080;position:relative">
                 <button @click="companyResult = null" class="close-btn" title="关闭">✕</button>
                 <div><strong>🏢 {{ companyResult.company_name }}</strong></div>
@@ -216,12 +222,10 @@ ACM-ICPC亚洲区域赛 银奖 2022
                 </div>
                 <div v-if="companyResult.summary" class="jd-item">{{ companyResult.summary }}</div>
                 <div v-if="companyResult.advice" class="jd-item"><strong>💡 建议：</strong>{{ companyResult.advice }}</div>
-
-                <!-- 天眼查核实清单 -->
                 <div v-if="companyResult.checklist && companyResult.checklist.length" style="margin-top:8px;padding:8px;background:#fff;border-radius:4px">
                     <strong>📋 建议去天眼查重点核实：</strong>
                     <ol style="margin:4px 0 0 18px;font-size:13px">
-                        <li v-for="item in companyResult.checklist" :key="item" style="margin:2px 0">{{ item }}</li>
+                        <li v-for="item in companyResult.checklist">{{ item }}</li>
                     </ol>
                 </div>
                 <div style="margin-top:6px;font-size:12px;color:#999">
@@ -229,30 +233,18 @@ ACM-ICPC亚洲区域赛 银奖 2022
                     <a :href="'https://www.tianyancha.com/search?key=' + encodeURIComponent(companyResult.company_name)" target="_blank">天眼查</a> ·
                     <a :href="'https://aiqicha.baidu.com/s?q=' + encodeURIComponent(companyResult.company_name)" target="_blank">爱企查</a>
                 </div>
-
-                <!-- 粘贴工商数据解读 -->
+                <!-- 工商数据解读 -->
                 <div style="margin-top:10px;padding-top:8px;border-top:1px dashed #e0d8c0">
                     <p style="font-size:12px;color:#888;margin-bottom:6px">💡 去天眼查复制公司信息粘贴到这里，AI帮你解读</p>
-                    <textarea v-model="rawCompanyData" rows="3" style="font-size:12px" placeholder="粘贴从天眼查/爱企查复制的公司信息...&#10;例：注册资本500万，实缴资本0，参保人数3人，成立日期2021-03-15..."></textarea>
+                    <textarea v-model="rawCompanyData" rows="3" style="font-size:12px" placeholder="粘贴从天眼查/爱企查复制的公司信息..."></textarea>
                     <button @click="interpretData" class="btn btn-sm" :disabled="interpreting || !rawCompanyData.trim()" style="margin-top:4px">
                         {{ interpreting ? '⏳ 解读中...' : '🔍 AI解读数据' }}
                     </button>
                 </div>
-            </div>
-
-            <!-- AI解读结果 -->
-            <div v-if="dataInterpretation" class="jd-analysis" style="background:#f0faf0;border-color:#b0d8b0;position:relative">
-                <button @click="dataInterpretation = null" class="close-btn" title="关闭">✕</button>
-                <div><strong>📊 数据解读</strong></div>
-                <div v-if="dataInterpretation.analysis" class="jd-item" style="margin-top:4px">{{ dataInterpretation.analysis }}</div>
-                <div v-if="dataInterpretation.positive_signals && dataInterpretation.positive_signals.length" class="jd-item">
-                    <strong>✅ 积极信号：</strong>{{ dataInterpretation.positive_signals.join('；') }}
+                <div v-if="dataInterpretation" style="margin-top:10px;padding:8px;background:#f0faf0;border-radius:4px">
+                    <strong>📊 数据解读：</strong>{{ dataInterpretation.analysis || '' }}
+                    <span v-if="dataInterpretation.verdict" class="jd-tag jd-tag-nice" style="margin-left:8px">{{ dataInterpretation.verdict }}</span>
                 </div>
-                <div v-if="dataInterpretation.risk_signals && dataInterpretation.risk_signals.length" class="jd-item">
-                    <strong>⚠️ 风险信号：</strong>{{ dataInterpretation.risk_signals.join('；') }}
-                </div>
-                <div v-if="dataInterpretation.verdict" class="jd-item"><strong>🏷 {{ dataInterpretation.verdict }}</strong></div>
-                <div v-if="dataInterpretation.action" class="jd-item">{{ dataInterpretation.action }}</div>
             </div>
             <p class="hint">💡 提示：生成前请确保「经历管理」中已录入你的基本信息、教育、项目等经历</p>
         </div>
@@ -267,7 +259,8 @@ ACM-ICPC亚洲区域赛 银奖 2022
                 <h3>📄 简历预览</h3>
                 <div class="toolbar">
                     <button @click="exportFile" class="btn btn-primary">🖨 打印 / 导出PDF</button>
-                    <span class="hint">在打印对话框中选择「另存为PDF」即可导出</span>
+                    <button @click="jumpToInterviewTab" class="btn btn-outline">🎤 模拟面试</button>
+                    <button @click="submitDelivery" class="btn btn-outline">📬 投递此岗位</button>
                 </div>
                 <iframe :srcdoc="result.resume_html" class="resume-iframe" id="resumeFrame"></iframe>
             </div>
@@ -296,16 +289,56 @@ ACM-ICPC亚洲区域赛 银奖 2022
         </div>
     </section>
 
-    <!-- ======== Tab3: 求职材料 ======== -->
-    <section v-show="currentTab === 'extra'" class="tab-content">
-        <h2>📋 求职材料</h2>
-        <p class="section-desc">基于你在「简历生成」中输入的JD和经历库，手动生成求职信和模拟面试题</p>
-        <p class="hint" v-if="!jdText.trim()">⚠️ 请先在「简历生成」Tab粘贴JD，再回来生成求职材料</p>
+    <!-- ======== Tab3: 公司洞察 ======== -->
+    <section v-show="currentTab === 'company'" class="tab-content">
+        <h2>🏢 公司洞察</h2>
+        <p class="section-desc">输入公司全称，AI自动生成结构化分析报告，帮你判断是否值得投递</p>
 
         <div class="card">
+            <h3>查找公司</h3>
+            <div class="form-grid">
+                <div class="field-group">
+                    <label>公司全称 <span class="required">*</span></label>
+                    <input v-model="companySearchName" placeholder="例：字节跳动有限公司" @keyup.enter="searchCompany">
+                </div>
+                <div class="field-group">
+                    <label>所在地（选填）</label>
+                    <input v-model="companySearchLocation" placeholder="例：北京">
+                </div>
+            </div>
+            <button @click="searchCompany" class="btn btn-primary" :disabled="companySearching || !companySearchName.trim()">
+                {{ companySearching ? '⏳ 正在搜索和分析...' : '🔍 开始分析' }}
+            </button>
+            <p v-if="companySearchError" class="hint" style="color:#dc2626">{{ companySearchError }}</p>
+        </div>
+
+        <!-- 报告 -->
+        <div v-if="companyReport" class="card" style="position:relative">
+            <button @click="companyReport = ''" class="close-btn" title="关闭">✕</button>
+            <div class="company-report-header">
+                <h3>📊 {{ companyReport.company_name }} 分析报告</h3>
+                <span class="hint">数据来源: {{ companyReport.source === 'dify' ? 'Dify AI' : 'DeepSeek AI' }} | 仅供参考</span>
+            </div>
+            <div class="company-report-body" v-html="renderMarkdown(companyReport.report)"></div>
+            <div style="margin-top:12px;display:flex;gap:8px">
+                <button @click="copyText(companyReport.report)" class="btn">📋 一键复制报告</button>
+                <a v-if="companySearchName" :href="'https://www.tianyancha.com/search?key=' + encodeURIComponent(companySearchName)" target="_blank" class="btn btn-outline">🔗 天眼查</a>
+                <a v-if="companySearchName" :href="'https://aiqicha.baidu.com/s?q=' + encodeURIComponent(companySearchName)" target="_blank" class="btn btn-outline">🔗 爱企查</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- ======== Tab4: 面试准备 ======== -->
+    <section v-show="currentTab === 'interview'" class="tab-content">
+        <h2>🎤 面试准备</h2>
+        <p class="section-desc">求职信 + 面试题 + AI模拟面试，一站式面试准备</p>
+        <p class="hint" v-if="!jdText.trim()">⚠️ 请先在「简历生成」Tab粘贴目标岗位JD</p>
+
+        <!-- 求职信 -->
+        <div class="card">
             <h3>📝 求职信</h3>
-            <p class="field-hint">AI根据你的经历和JD，写一段200-300字的求职信/自我介绍，说明你为什么适合这个岗位</p>
-            <button @click="genCoverLetter" class="btn btn-primary" :disabled="genCoverLoading || !jdText.trim()">
+            <p class="field-hint">AI根据你的经历和JD，写一段200-300字的求职信</p>
+            <button @click="genCoverLetter" class="btn" :disabled="genCoverLoading || !jdText.trim()">
                 {{ genCoverLoading ? '⏳ 生成中...' : '🤖 生成求职信' }}
             </button>
             <div v-if="coverLetter" class="result-box" style="margin-top:12px;position:relative">
@@ -315,10 +348,11 @@ ACM-ICPC亚洲区域赛 银奖 2022
             </div>
         </div>
 
+        <!-- 快速出题（DeepSeek直连） -->
         <div class="card">
-            <h3>🎤 模拟面试题</h3>
-            <p class="field-hint">AI基于JD和你的项目经历，生成8-10道面试题，分技术题、项目深挖、行为题三类</p>
-            <button @click="genInterview" class="btn btn-primary" :disabled="genIntvLoading || !jdText.trim()">
+            <h3>📋 面试题生成</h3>
+            <p class="field-hint">AI基于JD和你的经历，一次性生成8-10道面试题（技术题/项目深挖/行为题），适合快速浏览准备</p>
+            <button @click="genInterview" class="btn" :disabled="genIntvLoading || !jdText.trim()">
                 {{ genIntvLoading ? '⏳ 生成中...' : '🤖 生成面试题' }}
             </button>
             <div v-if="interviewQs" class="interview-section" style="position:relative">
@@ -334,6 +368,112 @@ ACM-ICPC亚洲区域赛 银奖 2022
                 <div v-if="interviewQs.behavioral_questions && interviewQs.behavioral_questions.length" style="margin-top:12px">
                     <h4>💬 行为题</h4>
                     <ol><li v-for="q in interviewQs.behavioral_questions" :key="q.question">{{ q.question }} <small>— {{ q.purpose }}</small></li></ol>
+                </div>
+            </div>
+        </div>
+
+        <!-- 交互式模拟面试（Dify / DeepSeek降级） -->
+        <div class="card highlight-card">
+            <h3>🎤 交互式模拟面试</h3>
+            <p class="field-hint">AI扮演面试官，逐题提问+追问+评估报告。预计5-10题，时长约25-35分钟。请尽量详细回答。</p>
+
+            <div v-if="!interviewSessionId">
+                <button @click="startInterview" class="btn btn-primary" :disabled="interviewLoading || !jdText.trim()">
+                    {{ interviewLoading ? '⏳ 准备中...' : '🎤 开始交互面试' }}
+                </button>
+                <button @click="voiceEnabled = !voiceEnabled" class="btn" style="margin-left:8px" :class="{'btn-primary': voiceEnabled}">
+                    {{ voiceEnabled ? '🎙 语音已开' : '🎙 开启语音' }}
+                </button>
+                <span v-if="voiceEnabled" class="hint" style="margin-left:8px">语音模式：AI提问将朗读，你说出回答后自动提交</span>
+            </div>
+
+            <div v-if="interviewSessionId && !interviewComplete">
+                <div class="interview-header">
+                    <span class="interview-progress">第 {{ interviewCurrentIndex + 1 }} / {{ interviewTotalQuestions }} 题<span v-if="interviewIsFollowup" style="color:#f59e0b">（追问）</span></span>
+                    <button @click="endInterview" class="btn-small btn-danger">结束面试</button>
+                </div>
+                <div class="interview-chat">
+                    <div class="chat-message chat-ai"><div class="chat-bubble"><strong>🤖 面试官：</strong><p>{{ interviewCurrentQuestion }}</p><small v-if="interviewCurrentPurpose" style="color:#888">考察点: {{ interviewCurrentPurpose }}</small></div></div>
+                    <div v-for="(msg, idx) in interviewHistory" :key="idx">
+                        <div class="chat-message chat-user"><div class="chat-bubble"><strong>👤 你：</strong><p>{{ msg.answer }}</p></div></div>
+                        <div v-if="msg.followup" class="chat-message chat-ai"><div class="chat-bubble"><strong>🤖 追问：</strong><p>{{ msg.followup }}</p></div></div>
+                    </div>
+                </div>
+                <div v-if="voiceEnabled && voiceStatus" class="voice-status" :style="{color: voiceStatus === 'listening' ? '#1a73e8' : '#f59e0b'}">
+                    {{ voiceStatus === 'listening' ? '🎙 正在聆听...请说话' : voiceStatus === 'thinking' ? '🤔 识别中...' : voiceStatus === 'speaking' ? '🔊 面试官说话中...' : '' }}
+                </div>
+                <div class="interview-input-row">
+                    <textarea v-model="interviewAnswer" rows="2" :placeholder="voiceEnabled ? '语音自动填入，也可手动输入...' : '输入你的回答...'" @keyup.ctrl.enter="submitInterviewAnswer" class="interview-input"></textarea>
+                    <button @click="submitInterviewAnswer" class="btn btn-primary" :disabled="interviewSubmitting || !interviewAnswer.trim()">{{ interviewSubmitting ? '⏳' : '📤' }}</button>
+                </div>
+            </div>
+
+            <div v-if="interviewComplete && interviewEvaluation">
+                <button @click="resetInterview" class="close-btn" title="关闭">✕</button>
+                <h4 style="margin-bottom:8px">📊 评估报告</h4>
+                <div v-if="interviewEvaluation.overall_match" class="eval-section"><div class="eval-match"><span class="eval-match-score">{{ interviewEvaluation.overall_match }}</span><span>整体匹配度</span></div><p>{{ interviewEvaluation.overall_comment }}</p></div>
+                <div v-if="interviewEvaluation.dimensions" class="eval-section"><h4>⭐ 分维度评分</h4><div v-for="dim in interviewEvaluation.dimensions" :key="dim.name" class="eval-dim"><span class="eval-dim-name">{{ dim.name }}</span><span class="eval-dim-stars">{{ '★'.repeat(dim.stars) }}{{ '☆'.repeat(5 - dim.stars) }}</span><span class="eval-dim-comment">{{ dim.comment }}</span></div></div>
+                <div v-if="interviewEvaluation.highlights && interviewEvaluation.highlights.length" class="eval-section"><h4>💡 亮点</h4><ul><li v-for="h in interviewEvaluation.highlights">{{ h }}</li></ul></div>
+                <div v-if="interviewEvaluation.improvements && interviewEvaluation.improvements.length" class="eval-section"><h4>📝 改进</h4><ul><li v-for="imp in interviewEvaluation.improvements">{{ imp }}</li></ul></div>
+                <div v-if="interviewEvaluation.preparation_advice" class="eval-section"><h4>🎯 准备方向</h4><p>{{ interviewEvaluation.preparation_advice }}</p></div>
+                <button @click="resetInterview" class="btn btn-primary" style="margin-top:8px">🔄 新一轮面试</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- ======== Tab5: 我的投递 ======== -->
+    <section v-show="currentTab === 'delivery'" class="tab-content">
+        <h2>📬 我的投递</h2>
+        <p class="section-desc">管理所有已投递的岗位记录</p>
+
+        <div class="card">
+            <div class="delivery-search-row">
+                <input v-model="deliverySearch" placeholder="搜索公司名或岗位名..." class="search-input"
+                       @keyup.enter="loadDeliveryRecords(1)">
+                <button @click="loadDeliveryRecords(1)" class="btn">🔍 搜索</button>
+            </div>
+
+            <div v-if="deliveryRecords.length === 0" class="empty-hint">
+                还没有投递记录 — 在「简历生成」Tab粘贴JD生成简历后，点击「投递此岗位」即可记录
+            </div>
+
+            <div v-for="rec in deliveryRecords" :key="rec.id" class="delivery-item" @click="viewDeliveryDetail(rec.id)">
+                <div class="delivery-item-main">
+                    <span class="delivery-company">{{ rec.company_name || '未识别公司' }}</span>
+                    <span class="delivery-job">{{ rec.job_title || '未识别岗位' }}</span>
+                </div>
+                <div class="delivery-item-meta">
+                    <span>{{ rec.delivery_time || rec.created_at }}</span>
+                    <span :class="'delivery-status delivery-status-' + (rec.delivery_status || 'pending')">{{ rec.delivery_status }}</span>
+                    <button @click.stop="deleteDeliveryRecord(rec.id)" class="btn-small btn-danger">删除</button>
+                </div>
+            </div>
+
+            <div v-if="deliveryTotal > deliveryPageSize" class="pagination">
+                <button @click="loadDeliveryRecords(deliveryPage - 1)" :disabled="deliveryPage <= 1" class="btn-small">上一页</button>
+                <span>第 {{ deliveryPage }} / {{ Math.ceil(deliveryTotal / deliveryPageSize) }} 页 (共 {{ deliveryTotal }} 条)</span>
+                <button @click="loadDeliveryRecords(deliveryPage + 1)" :disabled="deliveryPage >= Math.ceil(deliveryTotal / deliveryPageSize)" class="btn-small">下一页</button>
+            </div>
+        </div>
+
+        <!-- 投递详情弹窗 -->
+        <div v-if="deliveryDetail" class="modal-overlay" @click.self="deliveryDetail = null">
+            <div class="modal-content">
+                <button @click="deliveryDetail = null" class="close-btn" title="关闭">✕</button>
+                <h3>📋 投递详情</h3>
+                <div class="detail-grid">
+                    <div><strong>公司：</strong>{{ deliveryDetail.company_name || '未识别' }}</div>
+                    <div><strong>岗位：</strong>{{ deliveryDetail.job_title || '未识别' }}</div>
+                    <div><strong>投递时间：</strong>{{ deliveryDetail.delivery_time }}</div>
+                    <div><strong>状态：</strong>{{ deliveryDetail.delivery_status }}</div>
+                </div>
+                <div v-if="deliveryDetail.delivery_url" style="margin-top:8px">
+                    <a :href="deliveryDetail.delivery_url" target="_blank" class="btn btn-outline">🔗 打开投递页面</a>
+                </div>
+                <div style="margin-top:12px">
+                    <h4>📄 历史简历</h4>
+                    <iframe v-if="deliveryDetail.html_content" :srcdoc="deliveryDetail.html_content" class="resume-iframe"></iframe>
+                    <p v-else class="hint">简历内容不可用</p>
                 </div>
             </div>
         </div>

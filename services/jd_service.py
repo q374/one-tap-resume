@@ -27,7 +27,7 @@ class JDService:
             return {
                 "job_title": "", "company_name": "",
                 "hard_requirements": [], "nice_to_have": [],
-                "job_summary": "", "salary_range": "", "location": "",
+                "job_summary": "", "salary_range": "", "location": "", "url": "",
                 "raw_jd": jd_text, "cleaned_jd": cleaned
             }
 

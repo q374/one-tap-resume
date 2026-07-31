@@ -112,9 +112,56 @@ class Database:
                 cover_letter TEXT DEFAULT '',
                 interview_questions TEXT DEFAULT '',
                 company_analysis TEXT DEFAULT '',
-                created_at TEXT DEFAULT ''
+                created_at TEXT DEFAULT '',
+                company_name TEXT DEFAULT '',
+                job_title TEXT DEFAULT '',
+                is_delivered INTEGER DEFAULT 0,
+                delivery_time TEXT DEFAULT '',
+                delivery_url TEXT DEFAULT '',
+                delivery_status TEXT DEFAULT 'pending'
+            );
+
+            CREATE TABLE IF NOT EXISTS interview_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT UNIQUE NOT NULL,
+                status TEXT DEFAULT 'active',
+                basic_info_json TEXT DEFAULT '{}',
+                jd_text TEXT DEFAULT '',
+                experience_text TEXT DEFAULT '',
+                questions_json TEXT DEFAULT '[]',
+                current_question_index INTEGER DEFAULT 0,
+                chat_history_json TEXT DEFAULT '[]',
+                evaluation_json TEXT DEFAULT '',
+                started_at TEXT DEFAULT '',
+                ended_at TEXT DEFAULT ''
             );
         """)
+
+        # 迁移：为已有的 resume_records 表补充新字段
+        try:
+            cursor.execute("ALTER TABLE resume_records ADD COLUMN company_name TEXT DEFAULT ''")
+        except Exception:
+            pass
+        try:
+            cursor.execute("ALTER TABLE resume_records ADD COLUMN job_title TEXT DEFAULT ''")
+        except Exception:
+            pass
+        try:
+            cursor.execute("ALTER TABLE resume_records ADD COLUMN is_delivered INTEGER DEFAULT 0")
+        except Exception:
+            pass
+        try:
+            cursor.execute("ALTER TABLE resume_records ADD COLUMN delivery_time TEXT DEFAULT ''")
+        except Exception:
+            pass
+        try:
+            cursor.execute("ALTER TABLE resume_records ADD COLUMN delivery_url TEXT DEFAULT ''")
+        except Exception:
+            pass
+        try:
+            cursor.execute("ALTER TABLE resume_records ADD COLUMN delivery_status TEXT DEFAULT 'pending'")
+        except Exception:
+            pass
 
         conn.commit()
         conn.close()

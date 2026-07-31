@@ -3,11 +3,42 @@ const { createApp, ref, reactive, onMounted } = Vue;
 createApp({
     setup() {
         const tabs = [
+            {id: 'import', label: '🤖 AI导入'},
             {id: 'experience', label: '📝 经历管理'},
             {id: 'generate', label: '🎯 简历生成'},
-            {id: 'extra', label: '📋 求职材料'},
+            {id: 'company', label: '🏢 公司洞察'},
+            {id: 'interview', label: '🎤 面试准备'},
+            {id: 'delivery', label: '📬 我的投递'},
         ];
-        const currentTab = ref('experience');
+        const currentTab = ref('import');
+
+        function switchTab(tabId) {
+            currentTab.value = tabId;
+            if (tabId === 'delivery') {
+                loadDeliveryRecords(1);
+            }
+        }
+
+        // 跨Tab跳转
+        function jumpToCompanyTab() {
+            if (jdAnalysis.value && jdAnalysis.value.company_name) {
+                companySearchName.value = jdAnalysis.value.company_name;
+            }
+            currentTab.value = 'company';
+            // 自动触发搜索
+            if (companySearchName.value.trim()) {
+                searchCompany();
+            }
+        }
+
+        function jumpToInterviewTab() {
+            currentTab.value = 'interview';
+        }
+
+        function quickAnalyzeCompany() {
+            // 调用旧的 analyzeCompany，结果精简显示在 Tab 2
+            analyzeCompany();
+        }
 
         // ======== 经历管理 ========
         const basicInfo = reactive({name:'', phone:'', email:'', age:'', job_target:'', photo_path:''});
@@ -524,6 +555,356 @@ createApp({
             }
         }
 
+        // ======== 公司洞察 ========
+        const companySearchName = ref('');
+        const companySearchLocation = ref('');
+        const companySearching = ref(false);
+        const companyReport = ref(null);
+        const companySearchError = ref('');
+
+        async function searchCompany() {
+            if (!companySearchName.value.trim()) return;
+            companySearching.value = true;
+            companyReport.value = null;
+            companySearchError.value = '';
+            try {
+                const r = await API.post('/api/company/search', {
+                    company_name: companySearchName.value.trim(),
+                    location: companySearchLocation.value.trim(),
+                });
+                if (r.success) {
+                    companyReport.value = r;
+                } else {
+                    companySearchError.value = r.error || '分析失败';
+                }
+            } catch(e) {
+                companySearchError.value = '请求失败: ' + e.message;
+            }
+            companySearching.value = false;
+        }
+
+        function renderMarkdown(text) {
+            if (!text) return '';
+            // 简单markdown渲染
+            let html = text
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+                .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+                .replace(/^# (.+)$/gm, '<h2>$1</h2>')
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/^- (.+)$/gm, '<li>$1</li>')
+                .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
+                .replace(/\n\n/g, '</p><p>')
+                .replace(/\n/g, '<br>');
+            html = '<p>' + html + '</p>';
+            return html;
+        }
+
+        // ======== 模拟面试 ========
+        const interviewSessionId = ref('');
+        const interviewCurrentQuestion = ref('');
+        const interviewCurrentPurpose = ref('');
+        const interviewCurrentIndex = ref(0);
+        const interviewTotalQuestions = ref(0);
+        const interviewIsFollowup = ref(false);
+        const interviewAnswer = ref('');
+        const interviewHistory = ref([]);
+        const interviewComplete = ref(false);
+        const interviewEvaluation = ref(null);
+        const interviewLoading = ref(false);
+        const interviewSubmitting = ref(false);
+
+        async function startInterview() {
+            if (!jdText.value.trim()) { alert('请先在「简历生成」Tab粘贴目标岗位JD'); return; }
+            interviewLoading.value = true;
+            try {
+                const r = await API.post('/api/interview/start', { jd_text: jdText.value });
+                interviewSessionId.value = r.session_id;
+                interviewCurrentQuestion.value = r.question;
+                interviewCurrentPurpose.value = r.purpose || '';
+                interviewCurrentIndex.value = r.current_index;
+                interviewTotalQuestions.value = r.total_questions;
+                interviewIsFollowup.value = false;
+                interviewHistory.value = [];
+                interviewComplete.value = false;
+                interviewEvaluation.value = null;
+                currentTab.value = 'interview';
+                // 语音模式：朗读开场白和首题
+                if (voiceEnabled.value) {
+                    initRecognition();
+                    setTimeout(() => {
+                        speakInterviewStart(r.total_questions);
+                        setTimeout(() => speakText(r.question), 1000);
+                    }, 500);
+                }
+            } catch(e) { alert('面试启动失败: ' + e.message); }
+            interviewLoading.value = false;
+        }
+
+        async function submitInterviewAnswer() {
+            if (!interviewAnswer.value.trim() || !interviewSessionId.value) return;
+            interviewSubmitting.value = true;
+            const answer = interviewAnswer.value.trim();
+            interviewAnswer.value = '';
+
+            try {
+                const r = await API.post('/api/interview/answer', {
+                    session_id: interviewSessionId.value,
+                    answer: answer,
+                });
+
+                if (r.is_complete) {
+                    interviewComplete.value = true;
+                    interviewEvaluation.value = r.evaluation;
+                    interviewSessionId.value = '';
+                } else {
+                    if (r.is_followup) {
+                        interviewIsFollowup.value = true;
+                        interviewHistory.value.push({ answer: answer, followup: r.question });
+                    } else {
+                        interviewIsFollowup.value = false;
+                        interviewHistory.value.push({ answer: answer, followup: '' });
+                        interviewCurrentIndex.value = r.current_index;
+                    }
+                    interviewCurrentQuestion.value = r.question;
+                    interviewCurrentPurpose.value = r.purpose || '';
+                }
+                // 语音模式：朗读下一题/追问
+                if (voiceEnabled.value && !r.is_complete) {
+                    setTimeout(() => speakText(r.question), 300);
+                }
+            } catch(e) { alert('提交失败: ' + e.message); }
+            interviewSubmitting.value = false;
+        }
+
+        async function endInterview() {
+            if (!interviewSessionId.value) return;
+            if (!confirm('确认结束面试？结束后将生成评估报告。')) return;
+            try {
+                const r = await API.post('/api/interview/end', { session_id: interviewSessionId.value });
+                interviewComplete.value = true;
+                interviewEvaluation.value = r.evaluation;
+                interviewSessionId.value = '';
+            } catch(e) { alert('结束面试失败: ' + e.message); }
+        }
+
+        function resetInterview() {
+            stopVoiceRecognition();
+            interviewSessionId.value = '';
+            interviewCurrentQuestion.value = '';
+            interviewCurrentPurpose.value = '';
+            interviewCurrentIndex.value = 0;
+            interviewTotalQuestions.value = 0;
+            interviewIsFollowup.value = false;
+            interviewAnswer.value = '';
+            interviewHistory.value = [];
+            interviewComplete.value = false;
+            interviewEvaluation.value = null;
+        }
+
+        // ======== 语音模式 ========
+        const voiceEnabled = ref(false);
+        const voiceStatus = ref('');  // listening | thinking | speaking | null
+        let recognition = null;
+        let silenceTimer = null;
+        let finalTranscript = '';
+
+        function initRecognition() {
+            if (recognition) return;
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                alert('当前浏览器不支持语音识别，请使用Chrome浏览器');
+                voiceEnabled.value = false;
+                return;
+            }
+            recognition = new SpeechRecognition();
+            recognition.lang = 'zh-CN';
+            recognition.interimResults = true;
+            recognition.continuous = true;
+            recognition.maxAlternatives = 1;
+
+            recognition.onresult = (event) => {
+                let interim = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const r = event.results[i];
+                    if (r.isFinal) {
+                        finalTranscript += r[0].transcript;
+                    } else {
+                        interim += r[0].transcript;
+                    }
+                }
+                interviewAnswer.value = finalTranscript + interim;
+                // 重置静默计时器
+                clearTimeout(silenceTimer);
+                silenceTimer = setTimeout(() => {
+                    if (finalTranscript.trim() && voiceEnabled.value) {
+                        stopVoiceRecognition();
+                        voiceStatus.value = 'thinking';
+                        submitInterviewAnswer();
+                    }
+                }, 2500);  // 2.5秒不说话 → 自动提交
+            };
+
+            recognition.onerror = (event) => {
+                console.error('Speech error:', event.error);
+                if (event.error === 'no-speech' || event.error === 'aborted') {
+                    voiceStatus.value = 'listening';
+                    // 静默重启监听
+                    setTimeout(() => { if (voiceEnabled.value && interviewSessionId.value) startListening(); }, 1000);
+                } else if (event.error === 'not-allowed') {
+                    alert('请允许麦克风权限');
+                    voiceStatus.value = '';
+                }
+            };
+
+            recognition.onend = () => {
+                if (voiceStatus.value === 'listening') {
+                    // 意外停止时重启
+                    setTimeout(() => {
+                        if (voiceEnabled.value && interviewSessionId.value && !interviewComplete.value) {
+                            startListening();
+                        }
+                    }, 500);
+                }
+            };
+        }
+
+        function startListening() {
+            if (!recognition) initRecognition();
+            if (!recognition) return;
+            finalTranscript = '';
+            interviewAnswer.value = '';
+            voiceStatus.value = 'listening';
+            try {
+                recognition.start();
+            } catch(e) {
+                // 可能已经在监听中
+            }
+        }
+
+        function stopVoiceRecognition() {
+            clearTimeout(silenceTimer);
+            if (recognition) {
+                try { recognition.stop(); } catch(e) {}
+            }
+            voiceStatus.value = '';
+        }
+
+        function speakText(text) {
+            if (!voiceEnabled.value) return;
+            const synth = window.speechSynthesis;
+            if (!synth) return;
+            synth.cancel(); // 取消之前的朗读
+            voiceStatus.value = 'speaking';
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'zh-CN';
+            utterance.rate = 0.95;
+            utterance.pitch = 1.0;
+            // 选择最佳中文语音：优先 Huihui(女声) > Yaoyao(女声) > Kangkang(男声) > 任意中文
+            const voices = synth.getVoices();
+            const zhVoice = voices.find(v => v.name.includes('Huihui'))
+                || voices.find(v => v.name.includes('Yaoyao'))
+                || voices.find(v => v.name.includes('Kangkang'))
+                || voices.find(v => v.lang.startsWith('zh-CN'))
+                || voices.find(v => v.lang.startsWith('zh'))
+                || voices[0];
+            if (zhVoice) utterance.voice = zhVoice;
+            utterance.onend = () => {
+                voiceStatus.value = '';
+                // 朗读完后开始听
+                if (voiceEnabled.value && interviewSessionId.value && !interviewComplete.value) {
+                    startListening();
+                }
+            };
+            synth.speak(utterance);
+        }
+
+        // 开场白朗读
+        function speakInterviewStart(totalQuestions) {
+            if (!voiceEnabled.value) return;
+            const text = `面试开始，本次共${totalQuestions}道题。请认真回答每一个问题，尽量详细。`;
+            speakText(text);
+        }
+
+        // ======== 投递记录 ========
+        const deliverySearch = ref('');
+        const deliveryRecords = ref([]);
+        const deliveryPage = ref(1);
+        const deliveryPageSize = ref(20);
+        const deliveryTotal = ref(0);
+        const deliveryDetail = ref(null);
+
+        async function loadDeliveryRecords(page = 1) {
+            deliveryPage.value = page;
+            try {
+                const params = new URLSearchParams({
+                    search: deliverySearch.value,
+                    page: String(page),
+                    page_size: String(deliveryPageSize.value),
+                });
+                const r = await API.get('/api/delivery/records?' + params.toString());
+                deliveryRecords.value = r.records || [];
+                deliveryTotal.value = r.total || 0;
+            } catch(e) { console.error('加载投递记录失败:', e); }
+        }
+
+        async function viewDeliveryDetail(id) {
+            try {
+                deliveryDetail.value = await API.get('/api/delivery/records/' + id);
+            } catch(e) { alert('加载详情失败: ' + e.message); }
+        }
+
+        async function deleteDeliveryRecord(id) {
+            if (!confirm('确认删除此投递记录？')) return;
+            try {
+                await API.del('/api/delivery/records/' + id);
+                await loadDeliveryRecords(deliveryPage.value);
+            } catch(e) { alert('删除失败: ' + e.message); }
+        }
+
+        async function submitDelivery() {
+            if (!result.value || !result.value.resume_html) {
+                alert('请先生成简历'); return;
+            }
+            const cn = (jdAnalysis.value && jdAnalysis.value.company_name) ? jdAnalysis.value.company_name : '';
+            const jt = (jdAnalysis.value && jdAnalysis.value.job_title) ? jdAnalysis.value.job_title : '';
+
+            try {
+                const r = await API.post('/api/delivery/submit', {
+                    resume_html: result.value.resume_html,
+                    jd_text: jdText.value,
+                    company_name: cn,
+                    job_title: jt,
+                });
+                if (r.success) {
+                    await navigator.clipboard.writeText(
+                        new DOMParser().parseFromString(result.value.resume_html, 'text/html').body.textContent || ''
+                    ).catch(() => {});
+                    let msg = '✅ 投递成功！\n\n';
+                    if (r.company_name) msg += '公司：' + r.company_name + '\n';
+                    if (r.job_title) msg += '岗位：' + r.job_title + '\n';
+                    msg += '时间：' + r.delivery_time + '\n\n';
+                    msg += '简历内容已复制到剪贴板。';
+                    if (jdText.value) {
+                        const urlMatch = jdText.value.match(/https?:\/\/[^\s一-鿿]+/);
+                        if (urlMatch) {
+                            msg += '\n\n检测到JD中的链接，是否打开投递页面？';
+                            if (confirm(msg)) {
+                                window.open(urlMatch[0], '_blank');
+                            }
+                        } else {
+                            msg += '\n\n未检测到投递链接，请手动打开招聘App对应岗位页面进行投递。';
+                            alert(msg);
+                        }
+                    } else {
+                        alert(msg);
+                    }
+                } else {
+                    alert('投递失败: ' + (r.error || '未知错误'));
+                }
+            } catch(e) { alert('投递请求失败: ' + e.message); }
+        }
+
         // ======== 求职材料（求职信 + 面试题） ========
         const coverLetter = ref('');
         const genCoverLoading = ref(false);
@@ -571,7 +952,8 @@ createApp({
         });
 
         return {
-            tabs, currentTab,
+            tabs, currentTab, switchTab,
+            jumpToCompanyTab, jumpToInterviewTab, quickAnalyzeCompany,
             basicInfo, modules, selfEval, pasteText, parsing, photoPreviewUrl,
             getPhotoUrl,
             saveBasicInfo, saveSelfEval, formatItem,
@@ -582,13 +964,27 @@ createApp({
             jdText, templateType, tplFileInput, templateList, generating, result,
             toggleTplDropdown, tplDropdownOpen, deleteTemplateById, deleteSelectedTemplate,
             jdAnalysis, analyzingJD, analyzeJD,
-            companyResult, companyLoading, analyzeCompany,
+            companyResult, companyLoading, analyzeCompany, quickAnalyzeCompany,
             rawCompanyData, dataInterpretation, interpreting, interpretData,
             generateResume, exportFile,
             reviseInstruction, revising, hasRevision, reviseError,
             sendRevise, acceptRevision, rejectRevision,
             coverLetter, genCoverLoading, genCoverLetter,
-            interviewQs, genIntvLoading, genInterview, copyText,
+            interviewQs, genIntvLoading, genInterview, copyText, renderMarkdown,
+            // 公司洞察
+            companySearchName, companySearchLocation, companySearching, companyReport, companySearchError,
+            searchCompany,
+            // 面试准备
+            interviewSessionId, interviewCurrentQuestion, interviewCurrentPurpose,
+            interviewCurrentIndex, interviewTotalQuestions, interviewIsFollowup,
+            interviewAnswer, interviewHistory, interviewComplete, interviewEvaluation,
+            interviewLoading, interviewSubmitting,
+            voiceEnabled, voiceStatus,
+            startInterview, submitInterviewAnswer, endInterview, resetInterview,
+            // 投递记录
+            deliverySearch, deliveryRecords, deliveryPage, deliveryPageSize, deliveryTotal,
+            deliveryDetail,
+            loadDeliveryRecords, viewDeliveryDetail, deleteDeliveryRecord, submitDelivery,
         };
     }
 }).mount('#app');

@@ -12,7 +12,8 @@ def build_jd_clean_prompt(jd_text: str) -> str:
     "nice_to_have": ["加分项1", "加分项2"],
     "job_summary": "一句话工作内容概括",
     "salary_range": "薪资范围（如有）",
-    "location": "工作地点（如有）"
+    "location": "工作地点（如有）",
+    "url": "JD文本中包含的链接URL（如有，没有则为空字符串）"
 }}
 
 要求：hard_requirements 只列出具体的、可验证的硬性要求。不要把JD里的套话（如"有责任心""团队协作"）列为硬性要求。"""

@@ -19,7 +19,7 @@ from datetime import datetime
 from config import BASE_DIR
 from core import database as core_db
 from core.database import db
-from core.models import BasicInfo, Education, Internship, Project, Skill, Award, SelfEvaluation
+from core.models import BasicInfo, Education, Internship, Project, Skill, Award, SelfEvaluation, InterviewSession
 from core.deepseek_client import call_deepseek, call_deepseek_json
 from services.experience_service import experience_service
 from services.resume_service import resume_service
@@ -31,6 +31,8 @@ from services.cover_letter_service import cover_letter_service
 from services.interview_service import interview_service
 from services.revise_service import revise_service
 from services.template_converter import convert_to_html
+from services.company_search_service import analyze_company as search_company_info
+from services.dify_client import DIFY_COMPANY_AGENT_API_KEY, DIFY_INTERVIEW_AGENT_API_KEY
 from prompts.experience_parse import EXPERIENCE_PARSE_PROMPT
 from prompts.dedup import DEDUP_PROMPT
 
@@ -267,12 +269,12 @@ async def generate_resume(req: GenerateRequest):
     if not resume_result.get("html"):
         raise HTTPException(500, "简历生成失败，请重试")
 
-    # 3. 保存记录
+    # 3. 保存记录（生成历史，is_delivered=0 表示仅生成未投递）
     conn = db.get_connection()
     conn.execute(
         """INSERT INTO resume_records
-           (jd_text, jd_cleaned, template_name, html_content, created_at)
-           VALUES (?, ?, ?, ?, ?)""",
+           (jd_text, jd_cleaned, template_name, html_content, created_at, is_delivered)
+           VALUES (?, ?, ?, ?, ?, 0)""",
         (req.jd_text, req.jd_text, req.template_type,
          resume_result.get("html", ""),
          datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -381,6 +383,472 @@ async def interpret_company_data(req: CompanyDataInput):
         return result
     except Exception:
         return {"verdict": "无法分析", "action": "请确认粘贴的数据格式正确"}
+
+# ==================== Company Search (Agent A: 公司洞察) ====================
+
+class CompanySearchInput(BaseModel):
+    company_name: str
+    location: str = ""
+
+@app.post("/api/company/search")
+async def search_company(req: CompanySearchInput):
+    """公司洞察 — 生成6模块结构化分析报告"""
+    result = await search_company_info(req.company_name, req.location)
+    return result
+
+
+# ==================== Interview Session (Agent B: 模拟面试) ====================
+
+import uuid as uuid_module
+import json as json_module
+from core.database import db as _db
+
+@app.post("/api/interview/start")
+async def start_interview(request: Request):
+    """开始模拟面试 — 生成题目并返回首题"""
+    data = await request.json()
+    jd_text = data.get("jd_text", "")
+    if not jd_text.strip():
+        raise HTTPException(400, "请提供目标岗位JD")
+
+    exp_data = experience_service.export_all()
+    experience_text = exp_data["text"]
+    basic_info = exp_data["text"].split("\n教育背景")[0] if "\n教育背景" in exp_data["text"] else experience_text[:500]
+
+    session_id = f"iv_{uuid_module.uuid4().hex[:12]}"
+
+    # 用 DeepSeek 生成面试题目
+    from prompts.interview import build_interview_prompt
+    from core.deepseek_client import call_deepseek_json
+    questions_prompt = build_interview_prompt(experience_text, jd_text)
+    try:
+        questions_data = await call_deepseek_json(questions_prompt)
+        all_questions = (
+            questions_data.get("tech_questions", []) +
+            questions_data.get("project_deep_dive", []) +
+            questions_data.get("behavioral_questions", [])
+        )
+        # 限制最多10题
+        if len(all_questions) > 10:
+            all_questions = all_questions[:10]
+        if not all_questions:
+            all_questions = [{"question": "请简单介绍一下你自己和你为什么适合这个岗位？", "purpose": "了解候选人背景"}]
+    except Exception:
+        all_questions = [{"question": "请简单介绍一下你自己和你为什么适合这个岗位？", "purpose": "了解候选人背景"}]
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # 存入数据库
+    conn = _db.get_connection()
+    conn.execute(
+        """INSERT INTO interview_sessions
+           (session_id, status, basic_info_json, jd_text, experience_text,
+            questions_json, current_question_index, chat_history_json, started_at)
+           VALUES (?, 'active', ?, ?, ?, ?, 0, '[]', ?)""",
+        (session_id, basic_info, jd_text, experience_text,
+         json_module.dumps(all_questions, ensure_ascii=False), now)
+    )
+    conn.commit()
+    conn.close()
+
+    first_question = all_questions[0] if all_questions else {"question": "开始面试", "purpose": ""}
+
+    return {
+        "session_id": session_id,
+        "total_questions": len(all_questions),
+        "current_index": 0,
+        "question": first_question.get("question", ""),
+        "purpose": first_question.get("purpose", ""),
+        "started_at": now,
+    }
+
+
+@app.post("/api/interview/answer")
+async def submit_answer(request: Request):
+    """提交面试回答 — 返回追问或下一题"""
+    data = await request.json()
+    session_id = data.get("session_id", "")
+    answer = data.get("answer", "")
+
+    if not session_id:
+        raise HTTPException(400, "缺少 session_id")
+
+    conn = _db.get_connection()
+    row = conn.execute(
+        "SELECT * FROM interview_sessions WHERE session_id=? AND status='active'",
+        (session_id,)
+    ).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, "面试会话不存在或已结束")
+
+    session = InterviewSession.from_row(row)
+    questions = json_module.loads(session.questions_json)
+    chat_history = json_module.loads(session.chat_history_json)
+    current_idx = session.current_question_index
+
+    # 将当前回答加入聊天历史
+    current_q = questions[current_idx] if current_idx < len(questions) else {"question": "", "purpose": ""}
+    chat_history.append({
+        "role": "user",
+        "question": current_q.get("question", ""),
+        "answer": answer,
+        "index": current_idx,
+    })
+
+    # AI回应：先点评回答，再决定追问或进入下一题
+    is_followup = False
+    followup_question = ""
+    ai_response = ""
+
+    # 总是让AI回应（不只看长度），对话更自然
+    followup_prompt = f"""你正在面试一位候选人。面试氛围是专业但轻松的。
+
+你刚才问的问题：
+"{current_q.get('question', '')}"
+
+候选人的回答：
+"{answer}"
+
+【你的任务】
+1. 先简短自然地对候选人的回答做一个回应——可以是一个简短的肯定、一个相关的追问点、或者自然的过渡语。像真人面试官一样，不要说"收到"、"已记录"这种机械的话。
+   - 如果回答有深度：可以说"说得不错，尤其是XX部分"、"这个经验很有价值"
+   - 如果回答有模糊点：自然追问那个点
+   - 如果需要进入下一题：用过渡语如"了解了，那我们换个话题..."
+
+2. 然后决定下一步：
+   - 如果回答有值得深挖但不清晰的地方 → 自然追问，深入了解
+   - 如果回答已经足够完整 → 说"__NEXT__"进入下一题
+
+【输出格式】
+先写你的回应（1-2句话的自然对话），再另起一行写：
+__FOLLOWUP__（如果要追问的话）
+或
+__NEXT__（如果进入下一题）
+
+示例1（追问）：
+你在微服务拆分上的经验确实很丰富。能具体说说当时是怎么决定按业务域还是按技术层拆分的吗？
+__FOLLOWUP__
+
+示例2（下一题）：
+了解了，这个项目经历很有说服力。那我们换个方向聊聊...
+__NEXT__"""
+
+    from core.deepseek_client import call_deepseek
+    ai_text = await call_deepseek(followup_prompt, max_tokens=256)
+    if ai_text:
+        # 解析AI回应
+        if "__FOLLOWUP__" in ai_text:
+            is_followup = True
+            # 提取回应和追问
+            parts = ai_text.split("__FOLLOWUP__")
+            ai_response = parts[0].strip()
+            followup_question = parts[0].strip()  # 回应当作追问
+        elif "__NEXT__" in ai_text:
+            parts = ai_text.split("__NEXT__")
+            ai_response = parts[0].strip()
+            # 将AI回应追加到聊天记录
+            if ai_response and current_idx < len(questions):
+                chat_history.append({
+                    "role": "ai_response",
+                    "text": ai_response,
+                    "index": current_idx,
+                })
+        else:
+            # 没有标记时，整个文本作为追问
+            is_followup = True
+            followup_question = ai_text.strip()
+
+    if not is_followup:
+        # 进入下一题
+        current_idx += 1
+
+    is_complete = current_idx >= len(questions)
+
+    # 更新数据库
+    conn.execute(
+        """UPDATE interview_sessions
+           SET current_question_index=?, chat_history_json=?
+           WHERE session_id=?""",
+        (current_idx, json_module.dumps(chat_history, ensure_ascii=False), session_id)
+    )
+    conn.commit()
+
+    if is_complete:
+        # 生成评估报告
+        evaluation = await _generate_evaluation(chat_history, session.jd_text, session.experience_text)
+        conn.execute(
+            """UPDATE interview_sessions
+               SET status='completed', evaluation_json=?, ended_at=?
+               WHERE session_id=?""",
+            (json_module.dumps(evaluation, ensure_ascii=False),
+             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+             session_id)
+        )
+        conn.commit()
+        conn.close()
+        return {
+            "session_id": session_id,
+            "is_complete": True,
+            "evaluation": evaluation,
+        }
+
+    conn.close()
+
+    next_q = questions[current_idx] if current_idx < len(questions) else {"question": "", "purpose": ""}
+    return {
+        "session_id": session_id,
+        "is_complete": False,
+        "is_followup": is_followup,
+        "current_index": current_idx,
+        "total_questions": len(questions),
+        "question": followup_question if is_followup else next_q.get("question", ""),
+        "purpose": "" if is_followup else next_q.get("purpose", ""),
+    }
+
+
+@app.post("/api/interview/end")
+async def end_interview(request: Request):
+    """主动结束面试 — 生成评估"""
+    data = await request.json()
+    session_id = data.get("session_id", "")
+
+    conn = _db.get_connection()
+    row = conn.execute(
+        "SELECT * FROM interview_sessions WHERE session_id=? AND status='active'",
+        (session_id,)
+    ).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, "面试会话不存在或已结束")
+
+    session = InterviewSession.from_row(row)
+    chat_history = json_module.loads(session.chat_history_json)
+
+    evaluation = await _generate_evaluation(chat_history, session.jd_text, session.experience_text)
+
+    conn.execute(
+        """UPDATE interview_sessions
+           SET status='completed', evaluation_json=?, ended_at=?
+           WHERE session_id=?""",
+        (json_module.dumps(evaluation, ensure_ascii=False),
+         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+         session_id)
+    )
+    conn.commit()
+    conn.close()
+
+    return {
+        "session_id": session_id,
+        "is_complete": True,
+        "evaluation": evaluation,
+    }
+
+
+async def _generate_evaluation(chat_history: list, jd_text: str, experience_text: str) -> dict:
+    """生成面试评估报告"""
+    qa_text = ""
+    for item in chat_history:
+        qa_text += f"Q: {item.get('question', '')}\nA: {item.get('answer', '')}\n\n"
+
+    prompt = f"""你是面试评估专家。基于以下面试对话，给出结构化评估。
+
+【岗位JD】
+{jd_text}
+
+【候选人背景】
+{experience_text[:1000]}
+
+【面试对话记录】
+{qa_text}
+
+以JSON返回评估报告：
+{{
+    "overall_match": "85（示例：匹配度百分比）",
+    "overall_comment": "整体简评",
+    "dimensions": [
+        {{"name": "经历匹配度", "stars": 4, "comment": "评分理由"}},
+        {{"name": "逻辑与表达", "stars": 4, "comment": "评分理由"}},
+        {{"name": "技术深度", "stars": 3, "comment": "评分理由"}}
+    ],
+    "highlights": ["亮点1", "亮点2"],
+    "improvements": ["改进点1", "改进点2"],
+    "preparation_advice": "具体的学习或准备建议"
+}}
+
+要求：评分1-5星，建议要具体可操作。"""
+
+    from core.deepseek_client import call_deepseek_json
+    try:
+        return await call_deepseek_json(prompt)
+    except Exception:
+        return {
+            "overall_match": "N/A",
+            "overall_comment": "评估生成失败，请重试",
+            "dimensions": [],
+            "highlights": [],
+            "improvements": [],
+            "preparation_advice": "",
+        }
+
+
+# ==================== Delivery Records (Agent C: 投递助手) ====================
+
+class DeliverySubmitRequest(BaseModel):
+    resume_html: str
+    jd_text: str
+    company_name: str = ""
+    job_title: str = ""
+    delivery_url: str = ""
+
+@app.post("/api/delivery/submit")
+async def submit_delivery(req: DeliverySubmitRequest):
+    """投递此岗位 — 写入投递记录"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # 从JD中提取公司名和岗位名（如未提供）
+    company_name = req.company_name
+    job_title = req.job_title
+    if not company_name or not job_title:
+        try:
+            jd_result = await jd_service.clean(req.jd_text)
+            if not company_name:
+                company_name = jd_result.get("company_name", "")
+            if not job_title:
+                job_title = jd_result.get("job_title", "")
+        except Exception:
+            pass
+
+    # 检查重复投递
+    conn = _db.get_connection()
+    existing = conn.execute(
+        """SELECT id FROM resume_records
+           WHERE jd_text=? AND is_delivered=1
+           ORDER BY created_at DESC LIMIT 1""",
+        (req.jd_text,)
+    ).fetchone()
+
+    if existing:
+        conn.close()
+        return {"success": False, "error": "该JD已投递过，请勿重复投递", "duplicate_id": existing["id"]}
+
+    # 写入投递记录
+    conn.execute(
+        """INSERT INTO resume_records
+           (jd_text, html_content, company_name, job_title, is_delivered,
+            delivery_time, delivery_url, delivery_status, created_at)
+           VALUES (?, ?, ?, ?, 1, ?, ?, 'delivered', ?)""",
+        (req.jd_text, req.resume_html, company_name, job_title,
+         now, req.delivery_url, now)
+    )
+    conn.commit()
+    record_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.close()
+
+    return {
+        "success": True,
+        "record_id": record_id,
+        "company_name": company_name,
+        "job_title": job_title,
+        "delivery_time": now,
+        "message": "简历已复制到剪贴板",
+    }
+
+
+@app.get("/api/delivery/records")
+async def list_delivery_records(search: str = "", page: int = 1, page_size: int = 20):
+    """投递记录列表 — 支持搜索和分页"""
+    conn = _db.get_connection()
+    offset = (page - 1) * page_size
+
+    if search:
+        rows = conn.execute(
+            """SELECT id, company_name, job_title, delivery_time, delivery_status, created_at
+               FROM resume_records
+               WHERE is_delivered=1
+                 AND (company_name LIKE ? OR job_title LIKE ?)
+               ORDER BY delivery_time DESC
+               LIMIT ? OFFSET ?""",
+            (f"%{search}%", f"%{search}%", page_size, offset)
+        ).fetchall()
+
+        total_row = conn.execute(
+            """SELECT COUNT(*) as cnt FROM resume_records
+               WHERE is_delivered=1
+                 AND (company_name LIKE ? OR job_title LIKE ?)""",
+            (f"%{search}%", f"%{search}%")
+        ).fetchone()
+    else:
+        rows = conn.execute(
+            """SELECT id, company_name, job_title, delivery_time, delivery_status, created_at
+               FROM resume_records
+               WHERE is_delivered=1
+               ORDER BY delivery_time DESC
+               LIMIT ? OFFSET ?""",
+            (page_size, offset)
+        ).fetchall()
+
+        total_row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM resume_records WHERE is_delivered=1"
+        ).fetchone()
+
+    total = total_row["cnt"] if total_row else 0
+    conn.close()
+
+    records = []
+    for row in rows:
+        records.append({
+            "id": row["id"],
+            "company_name": row["company_name"],
+            "job_title": row["job_title"],
+            "delivery_time": row["delivery_time"],
+            "delivery_status": row["delivery_status"],
+            "created_at": row["created_at"],
+        })
+
+    return {
+        "records": records,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@app.get("/api/delivery/records/{record_id}")
+async def get_delivery_detail(record_id: int):
+    """投递详情 — 含历史简历HTML"""
+    conn = _db.get_connection()
+    row = conn.execute(
+        "SELECT * FROM resume_records WHERE id=? AND is_delivered=1",
+        (record_id,)
+    ).fetchone()
+    conn.close()
+
+    if not row:
+        raise HTTPException(404, "投递记录不存在")
+
+    return {
+        "id": row["id"],
+        "company_name": row["company_name"],
+        "job_title": row["job_title"],
+        "jd_text": row["jd_text"],
+        "html_content": row["html_content"],
+        "delivery_time": row["delivery_time"],
+        "delivery_url": row["delivery_url"],
+        "delivery_status": row["delivery_status"],
+        "created_at": row["created_at"],
+    }
+
+
+@app.delete("/api/delivery/records/{record_id}")
+async def delete_delivery_record(record_id: int):
+    """删除投递记录"""
+    conn = _db.get_connection()
+    conn.execute("DELETE FROM resume_records WHERE id=? AND is_delivered=1", (record_id,))
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
 
 # ==================== Template Routes ====================
 

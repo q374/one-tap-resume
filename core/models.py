@@ -20,7 +20,7 @@ class BasicInfo:
     def from_row(cls, row):
         if row is None:
             return cls()
-        return cls(**{k: row[k] for k in cls.__dataclass_fields__})
+        return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k in row.keys()})
 
 @dataclass
 class Education:
@@ -40,7 +40,7 @@ class Education:
     def from_row(cls, row):
         if row is None:
             return cls()
-        return cls(**{k: row[k] for k in cls.__dataclass_fields__})
+        return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k in row.keys()})
 
 @dataclass
 class Internship:
@@ -60,7 +60,7 @@ class Internship:
     def from_row(cls, row):
         if row is None:
             return cls()
-        return cls(**{k: row[k] for k in cls.__dataclass_fields__})
+        return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k in row.keys()})
 
 @dataclass
 class Project:
@@ -83,7 +83,7 @@ class Project:
     def from_row(cls, row):
         if row is None:
             return cls()
-        return cls(**{k: row[k] for k in cls.__dataclass_fields__})
+        return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k in row.keys()})
 
 @dataclass
 class Skill:
@@ -102,7 +102,7 @@ class Skill:
     def from_row(cls, row):
         if row is None:
             return cls()
-        return cls(**{k: row[k] for k in cls.__dataclass_fields__})
+        return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k in row.keys()})
 
 @dataclass
 class Award:
@@ -120,7 +120,7 @@ class Award:
     def from_row(cls, row):
         if row is None:
             return cls()
-        return cls(**{k: row[k] for k in cls.__dataclass_fields__})
+        return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k in row.keys()})
 
 @dataclass
 class SelfEvaluation:
@@ -135,7 +135,7 @@ class SelfEvaluation:
     def from_row(cls, row):
         if row is None:
             return cls()
-        return cls(**{k: row[k] for k in cls.__dataclass_fields__})
+        return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k in row.keys()})
 
 @dataclass
 class UserTemplate:
@@ -154,7 +154,7 @@ class UserTemplate:
     def from_row(cls, row):
         if row is None:
             return cls()
-        return cls(**{k: row[k] for k in cls.__dataclass_fields__})
+        return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k in row.keys()})
 
 @dataclass
 class ResumeRecord:

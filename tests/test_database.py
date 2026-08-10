@@ -31,7 +31,7 @@ def test_basic_info_crud(test_db):
 
     info_dict = info.to_dict()
     assert "name" in info_dict
-    assert "id" not in info_dict  # to_dict 不应包含 id
+    assert info_dict["id"] == row["id"]  # to_dict 应包含 id，供前端使用
 
     conn.close()
 

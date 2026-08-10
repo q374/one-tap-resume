@@ -658,14 +658,19 @@ createApp({
                     interviewEvaluation.value = r.evaluation;
                     interviewSessionId.value = '';
                 } else {
+                    const historyItem = {
+                        question: interviewCurrentQuestion.value,
+                        answer: answer,
+                        ai_text: r.ai_text || '',
+                        followup: r.is_followup ? r.question : '',
+                    };
                     if (r.is_followup) {
                         interviewIsFollowup.value = true;
-                        interviewHistory.value.push({ answer: answer, followup: r.question });
                     } else {
                         interviewIsFollowup.value = false;
-                        interviewHistory.value.push({ answer: answer, followup: '' });
                         interviewCurrentIndex.value = r.current_index;
                     }
+                    interviewHistory.value.push(historyItem);
                     interviewCurrentQuestion.value = r.question;
                     interviewCurrentPurpose.value = r.purpose || '';
                 }

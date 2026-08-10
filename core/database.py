@@ -1,6 +1,8 @@
 import sqlite3
 import os
-from config import DB_PATH
+from contextlib import contextmanager
+
+import config
 
 class Database:
     _instance = None
@@ -15,14 +17,31 @@ class Database:
         if self._initialized:
             return
         self._initialized = True
-        self.db_path = DB_PATH
+
+    @property
+    def db_path(self):
+        """动态读取 DB 路径，便于测试环境切换"""
+        return config.DB_PATH
 
     def get_connection(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(config.DB_PATH)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
+
+    @contextmanager
+    def connection(self):
+        """上下文管理器：自动 commit / rollback / close"""
+        conn = self.get_connection()
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def init_db(self):
         conn = self.get_connection()

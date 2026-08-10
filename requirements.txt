@@ -1,10 +1,19 @@
+# ===== 运行时依赖 =====
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 openai==1.58.1
 python-dotenv==1.0.1
-weasyprint==63.1
 pytesseract==0.3.13
 Pillow==11.0.0
 python-multipart==0.0.19
 aiofiles==24.1.0
 httpx==0.28.1
+
+# 简历导出 / 模板导入（PDF、Word）
+xhtml2pdf==0.2.15
+python-docx==1.1.2
+PyPDF2==3.0.1
+pywin32==308 ; sys_platform == "win32"
+
+# ===== 测试依赖 =====
+pytest==8.3.4

@@ -12,69 +12,58 @@ _MODEL_MAP = {
 class ExperienceService:
     # === Basic Info ===
     def get_basic_info(self) -> BasicInfo:
-        conn = db.get_connection()
-        row = conn.execute("SELECT * FROM basic_info ORDER BY id DESC LIMIT 1").fetchone()
-        conn.close()
+        with db.connection() as conn:
+            row = conn.execute("SELECT * FROM basic_info ORDER BY id DESC LIMIT 1").fetchone()
         return BasicInfo.from_row(row) if row else BasicInfo()
 
     def save_basic_info(self, data: BasicInfo) -> None:
-        conn = db.get_connection()
-        existing = conn.execute("SELECT id FROM basic_info ORDER BY id DESC LIMIT 1").fetchone()
         d = data.to_dict()
-        if existing:
-            conn.execute(
-                "UPDATE basic_info SET name=?, phone=?, email=?, age=?, job_target=?, photo_path=? WHERE id=?",
-                (d["name"], d["phone"], d["email"], d["age"], d["job_target"], d["photo_path"], existing["id"])
-            )
-        else:
-            conn.execute(
-                "INSERT INTO basic_info (name, phone, email, age, job_target, photo_path) VALUES (?, ?, ?, ?, ?, ?)",
-                (d["name"], d["phone"], d["email"], d["age"], d["job_target"], d["photo_path"])
-            )
-        conn.commit()
-        conn.close()
+        with db.connection() as conn:
+            existing = conn.execute("SELECT id FROM basic_info ORDER BY id DESC LIMIT 1").fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE basic_info SET name=?, phone=?, email=?, age=?, job_target=?, photo_path=? WHERE id=?",
+                    (d["name"], d["phone"], d["email"], d["age"], d["job_target"], d["photo_path"], existing["id"])
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO basic_info (name, phone, email, age, job_target, photo_path) VALUES (?, ?, ?, ?, ?, ?)",
+                    (d["name"], d["phone"], d["email"], d["age"], d["job_target"], d["photo_path"])
+                )
 
     # === Generic CRUD for list-type tables ===
     def _list(self, model_class, table_name: str) -> list:
-        conn = db.get_connection()
-        rows = conn.execute(f"SELECT * FROM {table_name} ORDER BY sort_order, id").fetchall()
-        conn.close()
+        with db.connection() as conn:
+            rows = conn.execute(f"SELECT * FROM {table_name} ORDER BY sort_order, id").fetchall()
         return [model_class.from_row(r) for r in rows]
 
     def _add(self, item, table_name: str) -> int:
-        conn = db.get_connection()
         d = item.to_dict()
         columns = ", ".join(d.keys())
         placeholders = ", ".join(["?"] * len(d))
-        cursor = conn.execute(
-            f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})",
-            list(d.values())
-        )
-        conn.commit()
-        item_id = cursor.lastrowid
-        conn.close()
+        with db.connection() as conn:
+            cursor = conn.execute(
+                f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})",
+                list(d.values())
+            )
+            item_id = cursor.lastrowid
         return item_id
 
     def _update(self, item, table_name: str) -> None:
-        conn = db.get_connection()
         d = item.to_dict()
         item_id = d.pop("id") if "id" in d else item.id
         if not item_id:
-            conn.close()
             return
         set_clause = ", ".join([f"{k}=?" for k in d.keys()])
-        conn.execute(
-            f"UPDATE {table_name} SET {set_clause} WHERE id=?",
-            list(d.values()) + [item_id]
-        )
-        conn.commit()
-        conn.close()
+        with db.connection() as conn:
+            conn.execute(
+                f"UPDATE {table_name} SET {set_clause} WHERE id=?",
+                list(d.values()) + [item_id]
+            )
 
     def _delete(self, table_name: str, item_id: int) -> None:
-        conn = db.get_connection()
-        conn.execute(f"DELETE FROM {table_name} WHERE id=?", (item_id,))
-        conn.commit()
-        conn.close()
+        with db.connection() as conn:
+            conn.execute(f"DELETE FROM {table_name} WHERE id=?", (item_id,))
 
     # === Education ===
     def list_education(self): return self._list(Education, "education")
@@ -108,29 +97,29 @@ class ExperienceService:
 
     # === Self Evaluation ===
     def get_self_evaluation(self) -> SelfEvaluation:
-        conn = db.get_connection()
-        row = conn.execute("SELECT * FROM self_evaluation ORDER BY id DESC LIMIT 1").fetchone()
-        conn.close()
+        with db.connection() as conn:
+            row = conn.execute("SELECT * FROM self_evaluation ORDER BY id DESC LIMIT 1").fetchone()
         return SelfEvaluation.from_row(row) if row else SelfEvaluation()
 
     def save_self_evaluation(self, data: SelfEvaluation) -> None:
-        conn = db.get_connection()
-        existing = conn.execute("SELECT id FROM self_evaluation ORDER BY id DESC LIMIT 1").fetchone()
         d = data.to_dict()
-        if existing:
-            conn.execute("UPDATE self_evaluation SET content=? WHERE id=?", (d["content"], existing["id"]))
-        else:
-            conn.execute("INSERT INTO self_evaluation (content) VALUES (?)", (d["content"],))
-        conn.commit()
-        conn.close()
+        with db.connection() as conn:
+            existing = conn.execute("SELECT id FROM self_evaluation ORDER BY id DESC LIMIT 1").fetchone()
+            if existing:
+                conn.execute("UPDATE self_evaluation SET content=? WHERE id=?", (d["content"], existing["id"]))
+            else:
+                conn.execute("INSERT INTO self_evaluation (content) VALUES (?)", (d["content"],))
 
     # === Reorder ===
-    def reorder_items(self, table_name: str, ids: list[int]) -> None:
-        conn = db.get_connection()
-        for i, item_id in enumerate(ids):
-            conn.execute(f"UPDATE {table_name} SET sort_order=? WHERE id=?", (i, item_id))
-        conn.commit()
-        conn.close()
+    def reorder_items(self, module: str, ids: list[int]) -> None:
+        """按 id 顺序重排条目（module 必须为白名单内的模块名）"""
+        entry = _MODEL_MAP.get(module)
+        if entry is None:
+            raise ValueError(f"未知模块: {module}")
+        table_name = entry[1]
+        with db.connection() as conn:
+            for i, item_id in enumerate(ids):
+                conn.execute(f"UPDATE {table_name} SET sort_order=? WHERE id=?", (i, item_id))
 
     # === Export all for prompt ===
     def export_all(self) -> dict:

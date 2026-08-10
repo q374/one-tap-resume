@@ -4,15 +4,18 @@ import os
 # 确保项目根目录在 Python 路径中
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, UploadFile, File, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse, JSONResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 import uvicorn
 
 import io
-import os
 import uuid
 from datetime import datetime
 
@@ -36,12 +39,19 @@ from services.dify_client import DIFY_COMPANY_AGENT_API_KEY, DIFY_INTERVIEW_AGEN
 from prompts.experience_parse import EXPERIENCE_PARSE_PROMPT
 from prompts.dedup import DEDUP_PROMPT
 
-app = FastAPI(title="AI简历定制工具", version="2.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期：启动时初始化数据库"""
+    db.init_db()
+    yield
+
+
+app = FastAPI(title="AI简历定制工具", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=["http://127.0.0.1:8765", "http://localhost:8765"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -49,14 +59,34 @@ app.add_middleware(
 # 静态文件
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
-@app.on_event("startup")
-async def startup():
-    """应用启动时初始化数据库"""
-    db.init_db()
+
+# ==================== 全局异常处理 ====================
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={"error": "参数校验失败", "detail": jsonable_encoder(exc.errors())},
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.detail, "detail": exc.detail},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"error": "服务器内部错误", "detail": str(exc)},
+    )
 
 @app.get("/")
 async def root():
-    from fastapi.responses import FileResponse, HTMLResponse
     index_path = os.path.join(BASE_DIR, "static", "index.html")
     if os.path.exists(index_path):
         return FileResponse(index_path)
@@ -97,18 +127,26 @@ async def save_basic_info(data: BasicInfoInput):
 @app.post("/api/experiences/upload-photo")
 async def upload_photo(file: UploadFile = File(...)):
     """上传用户照片，自动修正EXIF旋转，返回存储路径"""
-    import aiofiles
     from PIL import Image, ImageOps
+    from io import BytesIO
 
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'):
         raise HTTPException(400, "仅支持 JPG/PNG/GIF/BMP/WEBP 格式的图片")
 
     content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(400, "图片过大，请上传 10MB 以内的图片")
+
+    # 用Pillow验证文件是有效图片
+    try:
+        img = Image.open(BytesIO(content))
+        img.verify()
+    except Exception:
+        raise HTTPException(400, "上传文件不是有效的图片")
 
     # 用Pillow修正EXIF旋转（手机竖拍照片自动转正）
     try:
-        from io import BytesIO
         img = Image.open(BytesIO(content))
         img = ImageOps.exif_transpose(img)  # 根据EXIF自动旋转
         # 统一转为JPEG保存
@@ -120,21 +158,18 @@ async def upload_photo(file: UploadFile = File(...)):
         file_path = os.path.join(photos_dir, safe_name)
         img.save(file_path, 'JPEG', quality=90)
     except Exception:
-        # Pillow处理失败时直接保存原文件
-        photos_dir = os.path.join(BASE_DIR, "data", "photos")
-        os.makedirs(photos_dir, exist_ok=True)
-        safe_name = f"photo_{uuid.uuid4().hex}{ext}"
-        file_path = os.path.join(photos_dir, safe_name)
-        async with aiofiles.open(file_path, 'wb') as f:
-            await f.write(content)
+        raise HTTPException(400, "图片处理失败，请更换图片后重试")
 
     relative_path = f"data/photos/{safe_name}"
     return {"status": "ok", "photo_path": relative_path}
 
 @app.get("/api/photos/{filename}")
 async def get_photo(filename: str):
-    """提供照片文件访问，供前端预览"""
-    file_path = os.path.join(BASE_DIR, "data", "photos", filename)
+    """提供照片文件访问，供前端预览（防路径穿越）"""
+    photos_dir = os.path.realpath(os.path.join(BASE_DIR, "data", "photos"))
+    file_path = os.path.realpath(os.path.join(photos_dir, os.path.basename(filename)))
+    if not (file_path == photos_dir or file_path.startswith(photos_dir + os.sep)):
+        raise HTTPException(404, "照片不存在")
     if not os.path.exists(file_path):
         raise HTTPException(404, "照片不存在")
     return FileResponse(file_path)
@@ -161,8 +196,11 @@ class ParseTextInput(BaseModel):
 async def parse_text(data: ParseTextInput):
     """AI 解析用户粘贴的经历文本为结构化数据"""
     prompt = EXPERIENCE_PARSE_PROMPT.format(user_text=data.text)
-    result = await call_deepseek_json(prompt)
-    return result
+    try:
+        result = await call_deepseek_json(prompt)
+        return result
+    except Exception:
+        raise HTTPException(500, "AI 解析暂不可用，请稍后重试")
 
 # Semantic dedup check
 class DedupInput(BaseModel):
@@ -184,8 +222,11 @@ async def check_duplicate(data: DedupInput):
         existing_items=existing_text,
         new_item=data.new_text
     )
-    result = await call_deepseek_json(prompt)
-    return result
+    try:
+        result = await call_deepseek_json(prompt)
+        return result
+    except Exception:
+        return {"is_duplicate": False, "similar_items": [], "suggestion": "AI 去重检测暂不可用，请稍后重试"}
 
 # ======== 通用 CRUD 端点（/{module} 通配符 — 放在最后） ========
 
@@ -270,17 +311,15 @@ async def generate_resume(req: GenerateRequest):
         raise HTTPException(500, "简历生成失败，请重试")
 
     # 3. 保存记录（生成历史，is_delivered=0 表示仅生成未投递）
-    conn = db.get_connection()
-    conn.execute(
-        """INSERT INTO resume_records
-           (jd_text, jd_cleaned, template_name, html_content, created_at, is_delivered)
-           VALUES (?, ?, ?, ?, ?, 0)""",
-        (req.jd_text, req.jd_text, req.template_type,
-         resume_result.get("html", ""),
-         datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    )
-    conn.commit()
-    conn.close()
+    with db.connection() as conn:
+        conn.execute(
+            """INSERT INTO resume_records
+               (jd_text, jd_cleaned, template_name, html_content, created_at, is_delivered)
+               VALUES (?, ?, ?, ?, ?, 0)""",
+            (req.jd_text, req.jd_text, req.template_type,
+             resume_result.get("html", ""),
+             datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        )
 
     return {
         "resume_html": resume_result.get("html"),
@@ -419,7 +458,6 @@ async def start_interview(request: Request):
 
     # 用 DeepSeek 生成面试题目
     from prompts.interview import build_interview_prompt
-    from core.deepseek_client import call_deepseek_json
     questions_prompt = build_interview_prompt(experience_text, jd_text)
     try:
         questions_data = await call_deepseek_json(questions_prompt)
@@ -439,17 +477,15 @@ async def start_interview(request: Request):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # 存入数据库
-    conn = _db.get_connection()
-    conn.execute(
-        """INSERT INTO interview_sessions
-           (session_id, status, basic_info_json, jd_text, experience_text,
-            questions_json, current_question_index, chat_history_json, started_at)
-           VALUES (?, 'active', ?, ?, ?, ?, 0, '[]', ?)""",
-        (session_id, basic_info, jd_text, experience_text,
-         json_module.dumps(all_questions, ensure_ascii=False), now)
-    )
-    conn.commit()
-    conn.close()
+    with _db.connection() as conn:
+        conn.execute(
+            """INSERT INTO interview_sessions
+               (session_id, status, basic_info_json, jd_text, experience_text,
+                questions_json, current_question_index, chat_history_json, started_at)
+               VALUES (?, 'active', ?, ?, ?, ?, 0, '[]', ?)""",
+            (session_id, basic_info, jd_text, experience_text,
+             json_module.dumps(all_questions, ensure_ascii=False), now)
+        )
 
     first_question = all_questions[0] if all_questions else {"question": "开始面试", "purpose": ""}
 
@@ -534,30 +570,51 @@ __FOLLOWUP__
 了解了，这个项目经历很有说服力。那我们换个方向聊聊...
 __NEXT__"""
 
-    from core.deepseek_client import call_deepseek
     ai_text = await call_deepseek(followup_prompt, max_tokens=256)
     if ai_text:
         # 解析AI回应
         if "__FOLLOWUP__" in ai_text:
             is_followup = True
-            # 提取回应和追问
-            parts = ai_text.split("__FOLLOWUP__")
+            # 提取回应和追问（分隔符之后才是真正的追问）
+            parts = ai_text.split("__FOLLOWUP__", 1)
             ai_response = parts[0].strip()
-            followup_question = parts[0].strip()  # 回应当作追问
+            followup_question = parts[1].strip() if len(parts) > 1 else ""
+            if not followup_question:
+                followup_question = ai_response
+            # AI 回应 + 追问一并写入聊天历史
+            chat_history.append({
+                "role": "ai_response",
+                "question": current_q.get("question", ""),
+                "answer": answer,
+                "text": ai_response,
+                "followup": followup_question,
+                "index": current_idx,
+            })
         elif "__NEXT__" in ai_text:
-            parts = ai_text.split("__NEXT__")
+            parts = ai_text.split("__NEXT__", 1)
             ai_response = parts[0].strip()
             # 将AI回应追加到聊天记录
-            if ai_response and current_idx < len(questions):
+            if ai_response:
                 chat_history.append({
                     "role": "ai_response",
+                    "question": current_q.get("question", ""),
+                    "answer": answer,
                     "text": ai_response,
+                    "followup": "",
                     "index": current_idx,
                 })
         else:
             # 没有标记时，整个文本作为追问
             is_followup = True
             followup_question = ai_text.strip()
+            chat_history.append({
+                "role": "ai_response",
+                "question": current_q.get("question", ""),
+                "answer": answer,
+                "text": "",
+                "followup": followup_question,
+                "index": current_idx,
+            })
 
     if not is_followup:
         # 进入下一题
@@ -604,6 +661,7 @@ __NEXT__"""
         "total_questions": len(questions),
         "question": followup_question if is_followup else next_q.get("question", ""),
         "purpose": "" if is_followup else next_q.get("purpose", ""),
+        "ai_text": ai_response,
     }
 
 
@@ -613,13 +671,12 @@ async def end_interview(request: Request):
     data = await request.json()
     session_id = data.get("session_id", "")
 
-    conn = _db.get_connection()
-    row = conn.execute(
-        "SELECT * FROM interview_sessions WHERE session_id=? AND status='active'",
-        (session_id,)
-    ).fetchone()
+    with _db.connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM interview_sessions WHERE session_id=? AND status='active'",
+            (session_id,)
+        ).fetchone()
     if not row:
-        conn.close()
         raise HTTPException(404, "面试会话不存在或已结束")
 
     session = InterviewSession.from_row(row)
@@ -627,16 +684,15 @@ async def end_interview(request: Request):
 
     evaluation = await _generate_evaluation(chat_history, session.jd_text, session.experience_text)
 
-    conn.execute(
-        """UPDATE interview_sessions
-           SET status='completed', evaluation_json=?, ended_at=?
-           WHERE session_id=?""",
-        (json_module.dumps(evaluation, ensure_ascii=False),
-         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-         session_id)
-    )
-    conn.commit()
-    conn.close()
+    with _db.connection() as conn:
+        conn.execute(
+            """UPDATE interview_sessions
+               SET status='completed', evaluation_json=?, ended_at=?
+               WHERE session_id=?""",
+            (json_module.dumps(evaluation, ensure_ascii=False),
+             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+             session_id)
+        )
 
     return {
         "session_id": session_id,
@@ -649,6 +705,12 @@ async def _generate_evaluation(chat_history: list, jd_text: str, experience_text
     """生成面试评估报告"""
     qa_text = ""
     for item in chat_history:
+        if item.get("role") == "ai_response":
+            # AI 回应条目：展示回应/追问内容，避免遗漏
+            ai_text = item.get("text", "") or item.get("followup", "")
+            if ai_text:
+                qa_text += f"AI: {ai_text}\n\n"
+            continue
         qa_text += f"Q: {item.get('question', '')}\nA: {item.get('answer', '')}\n\n"
 
     prompt = f"""你是面试评估专家。基于以下面试对话，给出结构化评估。
@@ -678,7 +740,6 @@ async def _generate_evaluation(chat_history: list, jd_text: str, experience_text
 
 要求：评分1-5星，建议要具体可操作。"""
 
-    from core.deepseek_client import call_deepseek_json
     try:
         return await call_deepseek_json(prompt)
     except Exception:
@@ -720,30 +781,28 @@ async def submit_delivery(req: DeliverySubmitRequest):
             pass
 
     # 检查重复投递
-    conn = _db.get_connection()
-    existing = conn.execute(
-        """SELECT id FROM resume_records
-           WHERE jd_text=? AND is_delivered=1
-           ORDER BY created_at DESC LIMIT 1""",
-        (req.jd_text,)
-    ).fetchone()
+    with _db.connection() as conn:
+        existing = conn.execute(
+            """SELECT id FROM resume_records
+               WHERE jd_text=? AND is_delivered=1
+               ORDER BY created_at DESC LIMIT 1""",
+            (req.jd_text,)
+        ).fetchone()
 
     if existing:
-        conn.close()
         return {"success": False, "error": "该JD已投递过，请勿重复投递", "duplicate_id": existing["id"]}
 
     # 写入投递记录
-    conn.execute(
-        """INSERT INTO resume_records
-           (jd_text, html_content, company_name, job_title, is_delivered,
-            delivery_time, delivery_url, delivery_status, created_at)
-           VALUES (?, ?, ?, ?, 1, ?, ?, 'delivered', ?)""",
-        (req.jd_text, req.resume_html, company_name, job_title,
-         now, req.delivery_url, now)
-    )
-    conn.commit()
-    record_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    conn.close()
+    with _db.connection() as conn:
+        conn.execute(
+            """INSERT INTO resume_records
+               (jd_text, html_content, company_name, job_title, is_delivered,
+                delivery_time, delivery_url, delivery_status, created_at)
+               VALUES (?, ?, ?, ?, 1, ?, ?, 'delivered', ?)""",
+            (req.jd_text, req.resume_html, company_name, job_title,
+             now, req.delivery_url, now)
+        )
+        record_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
     return {
         "success": True,
@@ -758,42 +817,40 @@ async def submit_delivery(req: DeliverySubmitRequest):
 @app.get("/api/delivery/records")
 async def list_delivery_records(search: str = "", page: int = 1, page_size: int = 20):
     """投递记录列表 — 支持搜索和分页"""
-    conn = _db.get_connection()
     offset = (page - 1) * page_size
+    with _db.connection() as conn:
+        if search:
+            rows = conn.execute(
+                """SELECT id, company_name, job_title, delivery_time, delivery_status, created_at
+                   FROM resume_records
+                   WHERE is_delivered=1
+                     AND (company_name LIKE ? OR job_title LIKE ?)
+                   ORDER BY delivery_time DESC
+                   LIMIT ? OFFSET ?""",
+                (f"%{search}%", f"%{search}%", page_size, offset)
+            ).fetchall()
 
-    if search:
-        rows = conn.execute(
-            """SELECT id, company_name, job_title, delivery_time, delivery_status, created_at
-               FROM resume_records
-               WHERE is_delivered=1
-                 AND (company_name LIKE ? OR job_title LIKE ?)
-               ORDER BY delivery_time DESC
-               LIMIT ? OFFSET ?""",
-            (f"%{search}%", f"%{search}%", page_size, offset)
-        ).fetchall()
+            total_row = conn.execute(
+                """SELECT COUNT(*) as cnt FROM resume_records
+                   WHERE is_delivered=1
+                     AND (company_name LIKE ? OR job_title LIKE ?)""",
+                (f"%{search}%", f"%{search}%")
+            ).fetchone()
+        else:
+            rows = conn.execute(
+                """SELECT id, company_name, job_title, delivery_time, delivery_status, created_at
+                   FROM resume_records
+                   WHERE is_delivered=1
+                   ORDER BY delivery_time DESC
+                   LIMIT ? OFFSET ?""",
+                (page_size, offset)
+            ).fetchall()
 
-        total_row = conn.execute(
-            """SELECT COUNT(*) as cnt FROM resume_records
-               WHERE is_delivered=1
-                 AND (company_name LIKE ? OR job_title LIKE ?)""",
-            (f"%{search}%", f"%{search}%")
-        ).fetchone()
-    else:
-        rows = conn.execute(
-            """SELECT id, company_name, job_title, delivery_time, delivery_status, created_at
-               FROM resume_records
-               WHERE is_delivered=1
-               ORDER BY delivery_time DESC
-               LIMIT ? OFFSET ?""",
-            (page_size, offset)
-        ).fetchall()
-
-        total_row = conn.execute(
-            "SELECT COUNT(*) as cnt FROM resume_records WHERE is_delivered=1"
-        ).fetchone()
+            total_row = conn.execute(
+                "SELECT COUNT(*) as cnt FROM resume_records WHERE is_delivered=1"
+            ).fetchone()
 
     total = total_row["cnt"] if total_row else 0
-    conn.close()
 
     records = []
     for row in rows:
@@ -817,12 +874,11 @@ async def list_delivery_records(search: str = "", page: int = 1, page_size: int 
 @app.get("/api/delivery/records/{record_id}")
 async def get_delivery_detail(record_id: int):
     """投递详情 — 含历史简历HTML"""
-    conn = _db.get_connection()
-    row = conn.execute(
-        "SELECT * FROM resume_records WHERE id=? AND is_delivered=1",
-        (record_id,)
-    ).fetchone()
-    conn.close()
+    with _db.connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM resume_records WHERE id=? AND is_delivered=1",
+            (record_id,)
+        ).fetchone()
 
     if not row:
         raise HTTPException(404, "投递记录不存在")
@@ -843,10 +899,8 @@ async def get_delivery_detail(record_id: int):
 @app.delete("/api/delivery/records/{record_id}")
 async def delete_delivery_record(record_id: int):
     """删除投递记录"""
-    conn = _db.get_connection()
-    conn.execute("DELETE FROM resume_records WHERE id=? AND is_delivered=1", (record_id,))
-    conn.commit()
-    conn.close()
+    with _db.connection() as conn:
+        conn.execute("DELETE FROM resume_records WHERE id=? AND is_delivered=1", (record_id,))
     return {"status": "ok"}
 
 
@@ -947,7 +1001,7 @@ async def ocr_extract(files: list[UploadFile] = File(...)):
 
 @app.post("/api/export/pdf")
 async def export_pdf(request: Request):
-    """导出 PDF — 优先使用 WeasyPrint，失败时降级为 HTML 下载"""
+    """导出 PDF — 优先使用 xhtml2pdf，失败时降级为 HTML 下载"""
     data = await request.json()
     html_content = data.get("html_content", "")
     if not html_content:
@@ -961,7 +1015,7 @@ async def export_pdf(request: Request):
             headers={"Content-Disposition": "attachment; filename=resume.pdf"}
         )
     except (OSError, RuntimeError) as e:
-        # WeasyPrint 不可用时（如 Windows 缺 GTK 库），降级为 HTML 文件下载
+        # xhtml2pdf 不可用时（中文/复杂 CSS 支持有限），降级为 HTML 文件下载
         # 用户可以用浏览器的 Ctrl+P 打印为 PDF
         html_full = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>简历</title>

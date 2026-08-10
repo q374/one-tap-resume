@@ -20,9 +20,8 @@ class TemplateService:
 
         try:
             tid = int(template_type)
-            conn = db.get_connection()
-            row = conn.execute("SELECT * FROM user_templates WHERE id=?", (tid,)).fetchone()
-            conn.close()
+            with db.connection() as conn:
+                row = conn.execute("SELECT * FROM user_templates WHERE id=?", (tid,)).fetchone()
             if row:
                 return row["html_content"]
         except (ValueError, TypeError):
@@ -37,9 +36,8 @@ class TemplateService:
             {"id": "default", "name": "默认模板（项目经历优先）", "is_builtin": True},
             {"id": "education", "name": "教育背景前置模板", "is_builtin": True},
         ]
-        conn = db.get_connection()
-        rows = conn.execute("SELECT id, name, is_builtin, created_at FROM user_templates ORDER BY id").fetchall()
-        conn.close()
+        with db.connection() as conn:
+            rows = conn.execute("SELECT id, name, is_builtin, created_at FROM user_templates ORDER BY id").fetchall()
         for row in rows:
             templates.append({
                 "id": str(row["id"]),
@@ -53,15 +51,13 @@ class TemplateService:
         parse_result = await self.parse_template(html_content)
         mapping_json = str(parse_result)
 
-        conn = db.get_connection()
-        cursor = conn.execute(
-            """INSERT INTO user_templates (name, html_content, mapping_json, is_builtin, created_at)
-               VALUES (?, ?, ?, 0, ?)""",
-            (name, html_content, mapping_json, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        )
-        conn.commit()
-        tid = cursor.lastrowid
-        conn.close()
+        with db.connection() as conn:
+            cursor = conn.execute(
+                """INSERT INTO user_templates (name, html_content, mapping_json, is_builtin, created_at)
+                   VALUES (?, ?, ?, 0, ?)""",
+                (name, html_content, mapping_json, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            )
+            tid = cursor.lastrowid
 
         return {"id": tid, "name": name, "parse_result": parse_result}
 
@@ -74,10 +70,8 @@ class TemplateService:
                     "template_name_suggestion": "", "error": "AI解析失败"}
 
     def delete_template(self, template_id: int) -> None:
-        conn = db.get_connection()
-        conn.execute("DELETE FROM user_templates WHERE id=? AND is_builtin=0", (template_id,))
-        conn.commit()
-        conn.close()
+        with db.connection() as conn:
+            conn.execute("DELETE FROM user_templates WHERE id=? AND is_builtin=0", (template_id,))
 
 
 template_service = TemplateService()

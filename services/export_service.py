@@ -3,8 +3,8 @@ import io
 
 class ExportService:
     def to_pdf(self, html_content: str) -> bytes:
-        """将HTML简历导出。优先尝试服务端PDF，失败时返回HTML供浏览器打印"""
-        # 尝试 xhtml2pdf（可能中文支持不佳）
+        """将HTML简历导出。优先用 xhtml2pdf 生成 PDF，失败时返回 HTML 供浏览器打印"""
+        # 尝试 xhtml2pdf（对复杂 CSS/中文支持有限，失败即降级）
         try:
             from xhtml2pdf import pisa
             import tempfile, os

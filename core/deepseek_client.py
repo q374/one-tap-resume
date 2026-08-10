@@ -56,9 +56,26 @@ async def call_deepseek_json(
     text = re.sub(r'^```(?:json)?\s*', '', text.strip())
     text = re.sub(r'\s*```$', '', text.strip())
 
-    # 尝试提取 JSON 对象
-    match = re.search(r'[\{\[].*[\}\]]', text, re.DOTALL)
-    if match:
-        text = match.group(0)
+    # 提取第一个完整 JSON 值（raw_decode 替代贪婪正则，容忍前后夹解释/纯文本）
+    return _extract_json(text)
 
-    return json.loads(text)
+
+def _extract_json(text: str):
+    """从 AI 响应中提取第一个完整的 JSON 值"""
+    decoder = json.JSONDecoder()
+    candidates = []
+    for start in ('{', '['):
+        idx = text.find(start)
+        if idx != -1:
+            candidates.append((start, idx))
+    if not candidates:
+        raise ValueError(f"AI 响应中未找到有效 JSON：{text[:200]}...")
+    # 按出现位置最靠前的起始符优先解析（数组输入时避免误取内部对象）
+    candidates.sort(key=lambda c: c[1])
+    for _start, idx in candidates:
+        try:
+            obj, _end = decoder.raw_decode(text[idx:])
+            return obj
+        except json.JSONDecodeError:
+            continue
+    raise ValueError(f"AI 响应中未找到有效 JSON：{text[:200]}...")

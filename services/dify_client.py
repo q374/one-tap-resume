@@ -21,7 +21,6 @@ DIFY_COMPANY_AGENT_API_KEY = os.environ.get("DIFY_COMPANY_AGENT_API_KEY", "")
 # Agent B: AI模拟面试官 (Chatflow 型应用)
 DIFY_INTERVIEW_AGENT_API_KEY = os.environ.get("DIFY_INTERVIEW_AGENT_API_KEY", "")
 
-
 async def run_workflow(
     api_key: str,
     inputs: dict,

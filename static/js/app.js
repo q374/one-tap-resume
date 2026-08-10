@@ -294,6 +294,16 @@ createApp({
         const generating = ref(false);
         const result = ref(null);
 
+        // 行业侧重点分析
+        const jdIndustry = ref('');
+        const industryOptions = ref([
+            '互联网/科技', '人工智能', '金融/银行/证券', '快消/消费品/零售',
+            '制造/汽车/工业', '医疗/医药/生物', '教育/培训', '咨询/审计/专业服务',
+            '传媒/内容/游戏', '能源/化工/材料', '建筑/地产/工程',
+        ]);
+        const industryAnalysis = ref(null);
+        const analyzingIndustry = ref(false);
+
         // JD分析
         const jdAnalysis = ref(null);
         const analyzingJD = ref(false);
@@ -301,10 +311,32 @@ createApp({
         async function analyzeJD() {
             if (!jdText.value.trim()) return;
             analyzingJD.value = true;
+            analyzingIndustry.value = true;
             try {
                 jdAnalysis.value = await API.post('/api/jd/clean', {jd_text: jdText.value});
             } catch(e) { alert('JD分析失败: ' + e.message); }
+            try {
+                industryAnalysis.value = await API.post('/api/jd/industry-analysis', {
+                    jd_text: jdText.value,
+                    industry: jdIndustry.value,
+                });
+            } catch(e) { /* 行业分析失败不阻断 */ }
             analyzingJD.value = false;
+            analyzingIndustry.value = false;
+        }
+
+        function industryConfidenceClass(conf) {
+            if (conf === 'high' || conf === 'user') return 'jd-tag-nice';
+            if (conf === 'medium') return '';
+            return 'jd-tag-hard';
+        }
+
+        function industryConfidenceLabel(conf) {
+            if (conf === 'high') return '置信度：高';
+            if (conf === 'medium') return '置信度：中';
+            if (conf === 'low') return '置信度：低';
+            if (conf === 'user') return '手动指定';
+            return conf;
         }
 
         // 公司分析
@@ -354,13 +386,31 @@ createApp({
             try {
                 result.value = await API.post('/api/resumes/generate', {
                     jd_text: jdText.value,
-                    template_type: templateType.value
+                    template_type: templateType.value,
+                    industry: jdIndustry.value,
                 });
                 currentTab.value = 'generate';
             } catch(e) {
                 alert('简历生成失败: ' + e.message + '\n\n可能原因: 1) 经历库为空 2) API Key未配置 3) 网络问题');
             }
             generating.value = false;
+        }
+
+        // 简历质量诊断（客观分 + AI找茬）
+        const diagnosing = ref(false);
+        const diagnosis = ref(null);
+
+        async function diagnoseResume() {
+            if (!result.value || !result.value.resume_html) { alert('请先生成简历'); return; }
+            diagnosing.value = true;
+            diagnosis.value = null;
+            try {
+                diagnosis.value = await API.post('/api/resumes/diagnose', {
+                    resume_html: result.value.resume_html,
+                    jd_text: jdText.value,
+                });
+            } catch(e) { alert('诊断失败: ' + e.message); }
+            diagnosing.value = false;
         }
 
         // 加载模板列表
@@ -968,7 +1018,11 @@ createApp({
             uploadPhoto, removePhoto, parseText,
             jdText, templateType, tplFileInput, templateList, generating, result,
             toggleTplDropdown, tplDropdownOpen, deleteTemplateById, deleteSelectedTemplate,
+            importTemplate,
             jdAnalysis, analyzingJD, analyzeJD,
+            jdIndustry, industryOptions, industryAnalysis, analyzingIndustry,
+            industryConfidenceClass, industryConfidenceLabel,
+            diagnosing, diagnosis, diagnoseResume,
             companyResult, companyLoading, analyzeCompany, quickAnalyzeCompany,
             rawCompanyData, dataInterpretation, interpreting, interpretData,
             generateResume, exportFile,

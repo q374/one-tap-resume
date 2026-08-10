@@ -1,6 +1,7 @@
 def build_resume_prompt(template_html: str, experience_text: str, jd_text: str,
                          age_directive: str, photo_directive: str,
-                         has_placeholders: bool = True) -> str:
+                         has_placeholders: bool = True,
+                         industry_context: str = "") -> str:
 
     # ========== 自定义模板（无占位符，如 Word/PDF 导入）==========
     if not has_placeholders:
@@ -25,6 +26,8 @@ def build_resume_prompt(template_html: str, experience_text: str, jd_text: str,
 
 【目标岗位JD】
 {jd_text}
+
+{industry_context}
 
 【HTML模板】
 ```html
@@ -62,6 +65,7 @@ def build_resume_prompt(template_html: str, experience_text: str, jd_text: str,
 20. **自我评价个性化**：自我评价部分必须严格控制在两句话以内，仅保留核心信息，内容需包含专业背景、动手能力及求职意向三个关键要素。禁止超过三行文本，避免放之四海而皆准的套话。
 21. **格式纯净**：只输出完整的、替换好内容的HTML代码，不要有任何多余的解释或问候语。
 22. **单页强制限制**：生成的简历内容必须完整呈现在单个页面内，绝对不得超过一页。优先确保P0和P1模块的完整展示，P2模块可根据空间情况省略。
+23. **行业侧重点遵循**：根据【行业侧重点分析】提供的行业侧重点（focus_points）、减分项（avoid）与语言风格（tone）组织内容重心（如该行业最看重项目量化成果、证书、或沟通能力），但这只作为「JD深度匹配」的增强上下文。**不得违反**三条红线：模板结构不可侵犯、数据来源唯一、单页强制限制。若行业分析与JD冲突，以JD为准。
 
 【写作指导】
 以下是具体的写作方向指导，供你参考。**禁止直接照抄示例文案**，必须基于个人真实经历生成原创内容：
@@ -82,6 +86,10 @@ def build_resume_prompt(template_html: str, experience_text: str, jd_text: str,
 3.  **目标岗位JD**：
     ```text
     {jd_text}
+    ```
+4.  **行业侧重点分析**：
+    ```text
+    {industry_context}
     ```
 
 【输出要求】

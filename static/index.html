@@ -181,6 +181,13 @@ ACM-ICPC亚洲区域赛 银奖 2022
                         {{ t.name }}
                     </option>
                 </select>
+                <button @click="tplFileInput.click()" class="btn btn-outline" title="导入自定义模板（支持 HTML/Word/PDF）">📂 导入模板</button>
+                <button @click="deleteSelectedTemplate" class="btn btn-outline" :disabled="!templateType || templateType === 'default' || templateType === 'education'" title="删除当前选中的自定义模板">🗑</button>
+                <input ref="tplFileInput" type="file" accept=".html,.htm,.docx,.doc,.pdf" style="display:none" @change="importTemplate">
+                <select v-model="jdIndustry" style="width:auto" title="目标行业（默认自动识别，可手动指定）">
+                    <option value="">🤖 自动识别</option>
+                    <option v-for="ind in industryOptions" :key="ind" :value="ind">{{ ind }}</option>
+                </select>
                 <button @click="analyzeJD" class="btn" :disabled="analyzingJD || !jdText.trim()">
                     {{ analyzingJD ? '⏳' : '🔍' }} 分析JD
                 </button>
@@ -211,6 +218,29 @@ ACM-ICPC亚洲区域赛 银奖 2022
                     <span v-for="r in jdAnalysis.nice_to_have" class="jd-tag jd-tag-nice">{{ r }}</span>
                 </div>
                 <div v-if="jdAnalysis.job_summary"><strong>概要：</strong>{{ jdAnalysis.job_summary }}</div>
+            </div>
+
+            <!-- 行业侧重点分析结果 -->
+            <div v-if="industryAnalysis" class="jd-analysis" style="background:#f0f7ff;border-color:#b0c8e8;position:relative">
+                <button @click="industryAnalysis = null" class="close-btn" title="关闭">✕</button>
+                <div>
+                    <strong>🧭 行业：{{ industryAnalysis.industry }}</strong>
+                    <span v-if="industryAnalysis.confidence" class="jd-tag" :class="industryConfidenceClass(industryAnalysis.confidence)">{{ industryConfidenceLabel(industryAnalysis.confidence) }}</span>
+                </div>
+                <div v-if="industryAnalysis.reason" class="jd-item" style="font-size:12px;color:#888">{{ industryAnalysis.reason }}</div>
+                <div v-if="industryAnalysis.focus_points && industryAnalysis.focus_points.length" style="margin-top:8px">
+                    <strong>🎯 该行业简历侧重点：</strong>
+                    <ul style="margin:4px 0 0 18px;font-size:13px">
+                        <li v-for="p in industryAnalysis.focus_points" :key="p">{{ p }}</li>
+                    </ul>
+                </div>
+                <div v-if="industryAnalysis.avoid && industryAnalysis.avoid.length" style="margin-top:8px">
+                    <strong>⚠️ 该行业减分项：</strong>
+                    <ul style="margin:4px 0 0 18px;font-size:13px">
+                        <li v-for="a in industryAnalysis.avoid" :key="a">{{ a }}</li>
+                    </ul>
+                </div>
+                <div v-if="industryAnalysis.tone" class="jd-item" style="margin-top:6px"><strong>✍️ 语言风格：</strong>{{ industryAnalysis.tone }}</div>
             </div>
 
             <!-- 快速公司分析结果（完整版） -->
@@ -251,6 +281,9 @@ ACM-ICPC亚洲区域赛 银奖 2022
 
         <!-- 生成结果 -->
         <div v-if="result" class="results">
+            <div v-if="result.industry" style="margin-bottom:8px">
+                <span class="jd-tag jd-tag-nice">🧭 已按「{{ result.industry }}」行业侧重点生成</span>
+            </div>
             <div v-if="result.resume_issues && result.resume_issues.length" class="card warning-card">
                 <h3>⚠️ 注意事项</h3>
                 <ul><li v-for="issue in result.resume_issues" :key="issue">{{ issue }}</li></ul>
@@ -259,10 +292,37 @@ ACM-ICPC亚洲区域赛 银奖 2022
                 <h3>📄 简历预览</h3>
                 <div class="toolbar">
                     <button @click="exportFile" class="btn btn-primary">🖨 打印 / 导出PDF</button>
+                    <button @click="diagnoseResume" class="btn btn-outline" :disabled="diagnosing">{{ diagnosing ? '⏳ 诊断中...' : '🔍 AI质量诊断' }}</button>
                     <button @click="jumpToInterviewTab" class="btn btn-outline">🎤 模拟面试</button>
                     <button @click="submitDelivery" class="btn btn-outline">📬 投递此岗位</button>
                 </div>
                 <iframe :srcdoc="result.resume_html" class="resume-iframe" id="resumeFrame"></iframe>
+            </div>
+
+            <!-- 简历质量诊断 -->
+            <div v-if="diagnosis" class="card" style="margin-top:16px">
+                <h3>🔍 简历质量诊断</h3>
+                <button @click="diagnosis = null" class="close-btn" title="关闭">✕</button>
+                <div v-if="diagnosis.objective" class="diagnosis-score-row">
+                    <div class="diagnosis-score">客观分 <strong>{{ diagnosis.objective.score }}</strong>/100</div>
+                    <div style="flex:1">
+                        <div v-for="c in diagnosis.objective.checks" :key="c.key" class="diagnosis-check" :class="c.pass ? 'ok' : 'warn'">
+                            {{ c.pass ? '✅' : '⚠️' }} {{ c.label }}：{{ c.detail }}
+                        </div>
+                    </div>
+                </div>
+                <div v-if="diagnosis.ai_findings" style="margin-top:12px">
+                    <h4>🧐 AI找茬（挑剔HR视角）</h4>
+                    <div v-if="diagnosis.ai_findings.error" class="hint">{{ diagnosis.ai_findings.error }}</div>
+                    <ul v-if="diagnosis.ai_findings.suggestions && diagnosis.ai_findings.suggestions.length" style="margin:6px 0 0 18px">
+                        <li v-for="(s, i) in diagnosis.ai_findings.suggestions" :key="i" style="margin:6px 0">
+                            <strong>{{ s.area }}</strong>：{{ s.issue }}<br>
+                            <span style="color:#166534">💡 {{ s.fix }}</span>
+                        </li>
+                    </ul>
+                    <div v-if="!diagnosis.ai_findings.suggestions || !diagnosis.ai_findings.suggestions.length" class="hint" style="margin-top:6px">AI 未找到明显硬伤</div>
+                </div>
+                <p class="hint" style="margin-top:10px;color:#888">⚠️ {{ diagnosis.disclaimer }}</p>
             </div>
 
             <!-- AI修改面板 -->

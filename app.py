@@ -27,6 +27,7 @@ from core.deepseek_client import call_deepseek, call_deepseek_json
 from services.experience_service import experience_service
 from services.resume_service import resume_service
 from services.jd_service import jd_service
+from services.industry_service import industry_service
 from services.template_service import template_service
 from services.ocr_service import ocr_service
 from services.export_service import export_service
@@ -36,6 +37,7 @@ from services.revise_service import revise_service
 from services.template_converter import convert_to_html
 from services.company_search_service import analyze_company as search_company_info
 from services.dify_client import DIFY_COMPANY_AGENT_API_KEY, DIFY_INTERVIEW_AGENT_API_KEY
+from services.diagnosis_service import diagnosis_service
 from prompts.experience_parse import EXPERIENCE_PARSE_PROMPT
 from prompts.dedup import DEDUP_PROMPT
 
@@ -288,6 +290,7 @@ async def reorder_module(module: str, data: ReorderInput):
 class GenerateRequest(BaseModel):
     jd_text: str
     template_type: str = "default"
+    industry: str = ""  # 用户手动选择的行业，空=自动识别
 
 @app.post("/api/resumes/generate")
 async def generate_resume(req: GenerateRequest):
@@ -304,7 +307,8 @@ async def generate_resume(req: GenerateRequest):
 
     # 2. 生成简历（单次AI调用，不再并行生成求职信/面试题/公司分析等）
     resume_result = await resume_service.generate(
-        template_html, experience_text, req.jd_text, photo_path
+        template_html, experience_text, req.jd_text, photo_path,
+        industry_override=req.industry,
     )
 
     if not resume_result.get("html"):
@@ -325,7 +329,21 @@ async def generate_resume(req: GenerateRequest):
         "resume_html": resume_result.get("html"),
         "resume_valid": resume_result.get("valid", False),
         "resume_issues": resume_result.get("issues", []),
+        "industry": resume_result.get("industry", ""),
     }
+
+# ==================== 简历质量诊断 ====================
+
+class DiagnoseRequest(BaseModel):
+    resume_html: str
+    jd_text: str = ""
+
+@app.post("/api/resumes/diagnose")
+async def diagnose_resume(req: DiagnoseRequest):
+    """简历质量诊断 — 客观分（代码算）+ AI找茬 + 边界说明"""
+    if not req.resume_html.strip():
+        raise HTTPException(400, "resume_html不能为空")
+    return await diagnosis_service.diagnose(req.resume_html, req.jd_text)
 
 # ==================== 求职信 & 面试题 ====================
 
@@ -971,6 +989,17 @@ async def clean_jd(request: Request):
         raise HTTPException(400, "jd_text is required")
     result = await jd_service.clean(jd_text)
     return result
+
+class IndustryAnalysisRequest(BaseModel):
+    jd_text: str
+    industry: str = ""  # 用户手动指定行业（可选，空=自动识别）
+
+@app.post("/api/jd/industry-analysis")
+async def industry_analysis(req: IndustryAnalysisRequest):
+    """行业侧重点分析 — 识别行业并给出该行业简历侧重点"""
+    if not req.jd_text.strip():
+        raise HTTPException(400, "JD不能为空")
+    return await industry_service.analyze(req.jd_text, industry_override=req.industry)
 
 # ==================== OCR Routes ====================
 

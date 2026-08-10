@@ -33,7 +33,8 @@ def _extract_text_segments(html: str) -> tuple[list[str], str]:
     return segments, skeleton
 
 
-def build_filler_prompt(segments: list[str], experience_text: str, jd_text: str) -> str:
+def build_filler_prompt(segments: list[str], experience_text: str, jd_text: str,
+                           industry_context: str = "") -> str:
     """构建「只返回文字内容」的 prompt"""
     seg_list = '\n'.join([f'[SEG_{i}] {s}' for i, s in enumerate(segments) if s.strip()])
 
@@ -60,6 +61,8 @@ SEG_N: KEEP
 
 【目标JD】
 {jd_text}
+
+{industry_context}
 
 【待填充段落】
 {seg_list}
@@ -100,7 +103,8 @@ def _rebuild_html(skeleton: str, filled_segments: list[str]) -> str:
 
 
 async def fill_custom_template(template_html: str, experience_text: str,
-                               jd_text: str) -> str | None:
+                               jd_text: str,
+                               industry_context: str = "") -> str | None:
     """自定义模板填充主流程
 
     1. 抽取模板文字 → 占位符骨架
@@ -114,7 +118,8 @@ async def fill_custom_template(template_html: str, experience_text: str,
     if not segments:
         return template_html  # 模板无文字，直接返回
 
-    prompt = build_filler_prompt(segments, experience_text, jd_text)
+    prompt = build_filler_prompt(segments, experience_text, jd_text,
+                               industry_context=industry_context)
 
     try:
         response = await call_deepseek(prompt, max_tokens=8192)

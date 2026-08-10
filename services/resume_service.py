@@ -5,6 +5,7 @@ from core.deepseek_client import call_deepseek
 from prompts.resume_generation import build_resume_prompt
 from services.html_cleaner import clean_html_response, validate_html, validate_content_authenticity
 from services.template_filler import fill_custom_template
+from services.industry_service import industry_service
 from config import BASE_DIR
 
 PHOTO_MARKER = '__PHOTO_BASE64__'
@@ -12,8 +13,22 @@ PHOTO_MARKER = '__PHOTO_BASE64__'
 
 class ResumeService:
     async def generate(self, template_html: str, experience_text: str,
-                       jd_text: str, photo_path: str = "") -> dict:
-        """生成简历 HTML，返回 {html, valid, issues}"""
+                       jd_text: str, photo_path: str = "",
+                       industry_override: str = "") -> dict:
+        """生成简历 HTML，返回 {html, valid, issues, industry}"""
+        # 行业侧重点分析（降级铁律：失败不影响简历生成）
+        industry_ctx = ""
+        industry_name = ""
+        try:
+            industry_analysis = await industry_service.analyze(
+                jd_text, industry_override=industry_override
+            )
+            industry_name = industry_analysis.get("industry", "")
+            industry_ctx = industry_service.build_industry_context(industry_analysis)
+        except Exception:
+            industry_ctx = ""
+            industry_name = ""
+
         # 年龄指令
         age_match = re.search(r'年龄[^0-9]*(\d+)', experience_text)
         age_directive = (
@@ -53,7 +68,8 @@ class ResumeService:
         if not has_placeholders:
             # 自定义模板：用 filler 管道（AI只出文本，代码负责拼回HTML）
             html_content = await fill_custom_template(
-                template_html, experience_text, jd_text
+                template_html, experience_text, jd_text,
+                industry_context=industry_ctx,
             )
             if not html_content:
                 return {"html": None, "valid": False, "issues": ["模板填充失败"]}
@@ -66,6 +82,7 @@ class ResumeService:
                 age_directive=age_directive,
                 photo_directive=photo_directive,
                 has_placeholders=True,
+                industry_context=industry_ctx,
             )
 
             html_content = await call_deepseek(prompt, max_tokens=16384)
@@ -87,7 +104,12 @@ class ResumeService:
         if not content_ok:
             issues.append(f"内容真实性: {content_msg}")
 
-        return {"html": html_content, "valid": valid and content_ok, "issues": issues}
+        return {
+            "html": html_content,
+            "valid": valid and content_ok,
+            "issues": issues,
+            "industry": industry_name,
+        }
 
 
 resume_service = ResumeService()

@@ -2,14 +2,23 @@ const { createApp, ref, reactive, onMounted } = Vue;
 
 createApp({
     setup() {
-        const tabs = [
-            {id: 'import', label: '🤖 AI导入'},
-            {id: 'experience', label: '📝 经历管理'},
-            {id: 'generate', label: '🎯 简历生成'},
-            {id: 'company', label: '🏢 公司洞察'},
-            {id: 'interview', label: '🎤 面试准备'},
-            {id: 'delivery', label: '📬 我的投递'},
-        ];
+        const svgImport = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>';
+const svgExperience = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>';
+const svgGenerate = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 15l2 2 4-4"/></svg>';
+const svgCompany = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>';
+const svgInterview = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+const svgDelivery = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
+
+const tabs = [
+    {id: 'import', label: 'AI导入', icon: svgImport, group: 'core'},
+    {id: 'experience', label: '经历管理', icon: svgExperience, group: 'core'},
+    {id: 'generate', label: '简历生成', icon: svgGenerate, group: 'core'},
+    {id: 'company', label: '公司洞察', icon: svgCompany, group: 'extra'},
+    {id: 'interview', label: '面试准备', icon: svgInterview, group: 'extra'},
+    {id: 'delivery', label: '我的投递', icon: svgDelivery, group: 'extra'},
+];
+const coreTabs = tabs.filter(t => t.group === 'core');
+const extraTabs = tabs.filter(t => t.group === 'extra');
         const currentTab = ref('import');
 
         function switchTab(tabId) {
@@ -1007,7 +1016,7 @@ createApp({
         });
 
         return {
-            tabs, currentTab, switchTab,
+            tabs, coreTabs, extraTabs, currentTab, switchTab,
             jumpToCompanyTab, jumpToInterviewTab, quickAnalyzeCompany,
             basicInfo, modules, selfEval, pasteText, parsing, photoPreviewUrl,
             getPhotoUrl,

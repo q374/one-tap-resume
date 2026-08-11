@@ -4,16 +4,38 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI简历定制工具</title>
+    <link rel="icon" type="image/png" href="/static/icons/app-icon-32.png">
     <link rel="stylesheet" href="/static/css/style.css">
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
 </head>
 <body>
-<div id="app">
-    <nav class="tab-bar">
-        <button v-for="tab in tabs" :key="tab.id"
-                :class="{active: currentTab === tab.id}"
-                @click="switchTab(tab.id)">{{ tab.label }}</button>
-    </nav>
+<div id="app" class="app-shell">
+    <aside class="sidebar">
+        <div class="sidebar-logo">
+            <img src="/static/icons/app-icon.png" alt="简历定制" class="logo-icon">
+            <span class="logo-name">简历定制</span>
+        </div>
+        <nav class="sidebar-nav">
+            <div class="nav-group">
+                <div class="nav-group-title">核心流程</div>
+                <button v-for="tab in coreTabs" :key="tab.id"
+                        :class="{active: currentTab === tab.id}"
+                        @click="switchTab(tab.id)">
+                    <span class="nav-icon" v-html="tab.icon"></span><span class="nav-label">{{ tab.label }}</span>
+                </button>
+            </div>
+            <div class="nav-group">
+                <div class="nav-group-title">增值功能</div>
+                <button v-for="tab in extraTabs" :key="tab.id"
+                        :class="{active: currentTab === tab.id}"
+                        @click="switchTab(tab.id)">
+                    <span class="nav-icon" v-html="tab.icon"></span><span class="nav-label">{{ tab.label }}</span>
+                </button>
+            </div>
+        </nav>
+        <div class="sidebar-footer">一次录入 · N 份定制</div>
+    </aside>
+    <main class="app-main">
 
     <!-- ======== Tab1: 经历管理 ======== -->
     <section v-show="currentTab === 'experience'" class="tab-content">
@@ -120,7 +142,7 @@
 
     <!-- ======== Tab1: AI智能导入 ======== -->
     <section v-show="currentTab === 'import'" class="tab-content">
-        <h2>🤖 AI 智能导入</h2>
+        <h2>✨ AI 智能导入</h2>
         <p class="section-desc">把整份简历草稿粘贴进来，AI 自动识别并导入到经历管理</p>
         <div class="card highlight-card">
             <h3>📋 粘贴简历草稿</h3>
@@ -149,7 +171,7 @@ ACM-ICPC亚洲区域赛 银奖 2022
 自我评价：
 热爱技术，有较强的自驱力和解决问题的能力"></textarea>
             <button @click="parseText" class="btn btn-primary" :disabled="parsing" style="margin-top:8px">
-                {{ parsing ? '⏳ AI 正在解析...' : '🤖 AI 解析并导入' }}
+                {{ parsing ? '⏳ AI 正在解析...' : '✨ AI 解析并导入' }}
             </button>
             <p class="hint">💡 提示：AI导入后请切换到「经历管理」Tab逐模块检查，确保信息准确</p>
         </div>
@@ -185,7 +207,7 @@ ACM-ICPC亚洲区域赛 银奖 2022
                 <button @click="deleteSelectedTemplate" class="btn btn-outline" :disabled="!templateType || templateType === 'default' || templateType === 'education'" title="删除当前选中的自定义模板">🗑</button>
                 <input ref="tplFileInput" type="file" accept=".html,.htm,.docx,.doc,.pdf" style="display:none" @change="importTemplate">
                 <select v-model="jdIndustry" style="width:auto" title="目标行业（默认自动识别，可手动指定）">
-                    <option value="">🤖 自动识别</option>
+                    <option value="">✨ 自动识别</option>
                     <option v-for="ind in industryOptions" :key="ind" :value="ind">{{ ind }}</option>
                 </select>
                 <button @click="analyzeJD" class="btn" :disabled="analyzingJD || !jdText.trim()">
@@ -335,7 +357,7 @@ ACM-ICPC亚洲区域赛 银奖 2022
                     <input v-model="reviseInstruction" placeholder="例：把项目经历写得更量化一些 / 把自我评价缩短到两句话"
                            @keyup.enter="sendRevise" class="revise-input">
                     <button @click="sendRevise" class="btn btn-primary" :disabled="revising || !reviseInstruction.trim()">
-                        {{ revising ? '⏳ AI修改中...' : '🤖 AI修改' }}
+                        {{ revising ? '⏳ AI修改中...' : '✨ AI修改' }}
                     </button>
                 </div>
                 <div v-if="reviseError" class="toast toast-error" style="margin-top:8px;padding:8px 12px;border-radius:6px;background:#fee2e2;color:#dc2626">{{ reviseError }}</div>
@@ -399,7 +421,7 @@ ACM-ICPC亚洲区域赛 银奖 2022
             <h3>📝 求职信</h3>
             <p class="field-hint">AI根据你的经历和JD，写一段200-300字的求职信</p>
             <button @click="genCoverLetter" class="btn" :disabled="genCoverLoading || !jdText.trim()">
-                {{ genCoverLoading ? '⏳ 生成中...' : '🤖 生成求职信' }}
+                {{ genCoverLoading ? '⏳ 生成中...' : '✨ 生成求职信' }}
             </button>
             <div v-if="coverLetter" class="result-box" style="margin-top:12px;position:relative">
                 <button @click="coverLetter = ''" class="close-btn" title="关闭">✕</button>
@@ -413,7 +435,7 @@ ACM-ICPC亚洲区域赛 银奖 2022
             <h3>📋 面试题生成</h3>
             <p class="field-hint">AI基于JD和你的经历，一次性生成8-10道面试题（技术题/项目深挖/行为题），适合快速浏览准备</p>
             <button @click="genInterview" class="btn" :disabled="genIntvLoading || !jdText.trim()">
-                {{ genIntvLoading ? '⏳ 生成中...' : '🤖 生成面试题' }}
+                {{ genIntvLoading ? '⏳ 生成中...' : '✨ 生成面试题' }}
             </button>
             <div v-if="interviewQs" class="interview-section" style="position:relative">
                 <button @click="interviewQs = null" class="close-btn" title="关闭">✕</button>
@@ -453,10 +475,10 @@ ACM-ICPC亚洲区域赛 银奖 2022
                     <button @click="endInterview" class="btn-small btn-danger">结束面试</button>
                 </div>
                 <div class="interview-chat">
-                    <div class="chat-message chat-ai"><div class="chat-bubble"><strong>🤖 面试官：</strong><p>{{ interviewCurrentQuestion }}</p><small v-if="interviewCurrentPurpose" style="color:#888">考察点: {{ interviewCurrentPurpose }}</small></div></div>
+                    <div class="chat-message chat-ai"><div class="chat-bubble"><strong>面试官：</strong><p>{{ interviewCurrentQuestion }}</p><small v-if="interviewCurrentPurpose" style="color:#888">考察点: {{ interviewCurrentPurpose }}</small></div></div>
                     <div v-for="(msg, idx) in interviewHistory" :key="idx">
                         <div class="chat-message chat-user"><div class="chat-bubble"><strong>👤 你：</strong><p>{{ msg.answer }}</p></div></div>
-                        <div v-if="msg.followup" class="chat-message chat-ai"><div class="chat-bubble"><strong>🤖 追问：</strong><p>{{ msg.followup }}</p></div></div>
+                        <div v-if="msg.followup" class="chat-message chat-ai"><div class="chat-bubble"><strong>追问：</strong><p>{{ msg.followup }}</p></div></div>
                     </div>
                 </div>
                 <div v-if="voiceEnabled && voiceStatus" class="voice-status" :style="{color: voiceStatus === 'listening' ? '#1a73e8' : '#f59e0b'}">
@@ -538,6 +560,7 @@ ACM-ICPC亚洲区域赛 银奖 2022
             </div>
         </div>
     </section>
+    </main>
 </div>
 <script src="/static/js/api.js"></script>
 <script src="/static/js/app.js"></script>

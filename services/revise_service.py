@@ -207,15 +207,21 @@ class ReviseService:
 【当前简历HTML】
 {html_clean}"""
 
-        try:
-            html_content = await call_deepseek(prompt, max_tokens=16384)
-        except Exception as e:
-            return None, f"API调用失败: {str(e)}"
-
-        if not html_content:
-            return None, "API返回空内容"
-
-        html_content = clean_html_response(html_content)
+        # Step 3b: 调用 AI 生成带 del/ins diff 标记的修改
+        # AI 偶发"只改文字不加标记"，检测到无任何 diff 标记时用更强提示重试 1 次
+        html_content = None
+        for _attempt in range(2):
+            try:
+                html_content = await call_deepseek(prompt, max_tokens=16384)
+            except Exception as e:
+                return None, f"API调用失败: {str(e)}"
+            if not html_content:
+                return None, "API返回空内容"
+            html_content = clean_html_response(html_content)
+            if "<del" in html_content or "<ins" in html_content:
+                break
+            if _attempt == 0:
+                prompt += '\n\n【再次强调，违反即失败】你刚才的输出没有任何 <del class="ai-change"> / <ins class="ai-change"> 标记。本次修改必须：删除旧文字用 <del class="ai-change">旧文字</del> 包裹、新增文字用 <ins class="ai-change">新文字</ins> 包裹。即使只改一个词也必须用标记，绝不允许直接替换文字而不加标记。'
 
         # Step 4: 还原CSS
         html_content = _restore_css(html_content, css_blocks)

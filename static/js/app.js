@@ -556,8 +556,8 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
             let base = lv.base, line = lv.line, space = lv.space;
             if (fill) {
                 // 填充模式：在当前字号档位基础上放大字号 + 行高 + 间距（层级差靠 calc 相对差值保持）
-                const f = Math.max(1, Math.min(fillFactor || 1, 3.0));
-                base = Math.min(lv.base + (f - 1) * 2, 18);
+                const f = Math.max(1, Math.min(fillFactor || 1, 1.6));
+                base = Math.min(lv.base + (f - 1) * 2, 16);
                 line = Math.min(lv.line * Math.sqrt(f), 2.5);
                 space = Math.min(lv.space * Math.sqrt(f), 1.7);
             }
@@ -747,7 +747,7 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
                     // 不足（<0.985）：用确定性二分求"最大不超一页"的 fillFactor
                     // （内容高度随 ff 基本单调，二分稳定收敛；替代原先"放大→超页→二分"的震荡式）
                     fillMode.value = true;
-                    let lo = 1, hi = 3.0, best = 1, bestPages = getPages();
+                    let lo = 1, hi = 1.6, best = 1, bestPages = getPages();
                     for (let i = 0; i < 10; i++) {
                         const mid = (lo + hi) / 2;
                         fillFactor.value = mid;

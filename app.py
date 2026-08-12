@@ -209,6 +209,13 @@ async def move_experience_item(data: MoveItemInput):
     return {"status": "ok", "id": new_id}
 
 
+# AI 简历采集提示词（档2：用户复制去豆包等大模型，返回规范 JSON 再粘回工具）
+@app.get("/api/experiences/collect-prompt")
+async def get_collect_prompt():
+    """返回「AI 经历采集提示词」全文，供前端一键复制"""
+    from prompts.experience_collect import COLLECT_PROMPT
+    return {"prompt": COLLECT_PROMPT}
+
 # AI parse pasted text
 class ParseTextInput(BaseModel):
     text: str
@@ -369,6 +376,79 @@ async def _ai_semantic_dedup(items: dict, duplicates: list) -> list:
         except Exception:
             continue
     return result
+
+
+# ==================== 已有简历文件导入（方案B：PDF/Word 抽文本） ====================
+@app.post("/api/experiences/import-file")
+async def import_experience_file(file: UploadFile = File(...)):
+    """上传已有简历文件（PDF / Word .docx / .doc），提取纯文本，供 AI 解析导入
+
+    仅提取文字；图片型 PDF / 扫描件（无文本层）会明确报错，
+    引导用户用「方式二：采集提示词」或 OCR（后续升级方案C）。
+    """
+    import io as _py_io
+
+    filename = file.filename or "resume"
+    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+    content = await file.read()
+
+    try:
+        if ext == "pdf":
+            from PyPDF2 import PdfReader
+            reader = PdfReader(_py_io.BytesIO(content))
+            pages = []
+            for p in reader.pages:
+                t = p.extract_text() or ""
+                if t.strip():
+                    pages.append(t.strip())
+            text = "\n\n".join(pages)
+        elif ext == "docx":
+            from docx import Document
+            doc = Document(_py_io.BytesIO(content))
+            parts = [para.text for para in doc.paragraphs if para.text.strip()]
+            for table in doc.tables:
+                for row in table.rows:
+                    cells = [c.text.strip() for c in row.cells]
+                    parts.append(" | ".join([c for c in cells if c]))
+            text = "\n".join(parts)
+        elif ext == "doc":
+            text = await _extract_doc_text(content, filename)
+            if text is None:
+                raise HTTPException(400, ".doc 老格式解析失败，请用 Word 将文件另存为 .docx 后再上传")
+        else:
+            raise HTTPException(400, f"不支持的文件格式: .{ext}，请上传 .pdf / .docx / .doc")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"文件解析失败: {str(e)}")
+
+    text = (text or "").strip()
+    if not text:
+        raise HTTPException(400, "未能从文件中提取到文字：可能是扫描件/图片型 PDF。图片识别暂未开放（见后续升级方案），请改用「采集提示词」方式录入")
+    return {"text": text, "filename": filename, "ext": ext}
+
+
+async def _extract_doc_text(content: bytes, filename: str):
+    """.doc 老格式：调本机 Word（win32com）转纯文本；失败返回 None 走友好报错"""
+    import os as _os
+    import tempfile
+    try:
+        import win32com.client
+        tmp_dir = tempfile.mkdtemp(prefix="resume_doc_")
+        src = _os.path.join(tmp_dir, _os.path.basename(filename) or "resume.doc")
+        with open(src, "wb") as fh:
+            fh.write(content)
+        word = win32com.client.Dispatch("Word.Application")
+        word.Visible = False
+        try:
+            doc = word.Documents.Open(src, ReadOnly=True)
+            text = doc.Content.Text
+            doc.Close(False)
+            return text
+        finally:
+            word.Quit()
+    except Exception:
+        return None
 
 
 @app.post("/api/experiences/check-duplicate")

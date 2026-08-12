@@ -70,6 +70,9 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
         const selfEval = reactive({content:''});
         const pasteText = ref('');
         const parsing = ref(false);
+        const resumeFileInput = ref(null);
+        const fileImporting = ref(false);
+        const collectingPrompt = ref(false);
         const photoInput = ref(null);
         const photoPreviewUrl = ref('');
 
@@ -1466,6 +1469,41 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
             );
         }
 
+        // ======== AI 采集提示词（档2）========
+        async function copyCollectPrompt() {
+            collectingPrompt.value = true;
+            try {
+                const r = await API.get('/api/experiences/collect-prompt');
+                if (r && r.prompt) {
+                    await navigator.clipboard.writeText(r.prompt);
+                    alert('✅ 采集提示词已复制到剪贴板！\n\n用法：\n1. 打开豆包/任意大模型\n2. 粘贴这段提示词\n3. 按提示词说出你的经历\n4. 把 AI 返回的 JSON 复制回来，粘到下方输入框\n5. 点「AI 解析并导入」');
+                } else {
+                    alert('获取提示词失败，请重试');
+                }
+            } catch(e) {
+                alert('获取提示词失败: ' + e.message);
+            }
+            collectingPrompt.value = false;
+        }
+
+        // ======== 已有简历文件导入（方案B）========
+        async function importResumeFile(event) {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            fileImporting.value = true;
+            try {
+                const r = await API.upload('/api/experiences/import-file', file);
+                if (r && r.text) {
+                    pasteText.value = r.text;
+                    alert('✅ 已从「' + (r.filename || file.name) + '」提取到 ' + r.text.length + ' 字，填入下方输入框。\n\n点「✨ AI 解析并导入」完成结构化导入。\n\n若文字缺失/乱码，说明是扫描件或图片型 PDF，暂不支持，请改用「方式二」采集。');
+                }
+            } catch(e) {
+                alert('导入失败: ' + e.message);
+            }
+            fileImporting.value = false;
+            event.target.value = '';
+        }
+
         // ======== 初始化 ========
         onMounted(async () => {
             await loadExperiences();
@@ -1489,6 +1527,8 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
             deleteItem, loadExperiences, clearAllExperience,
             otherModules, moveItem,
             uploadPhoto, removePhoto, parseText,
+            resumeFileInput, fileImporting, collectingPrompt,
+            copyCollectPrompt, importResumeFile,
             jdText, templateType, tplFileInput, templateList, generating, result,
             toggleTplDropdown, tplDropdownOpen, deleteTemplateById, deleteSelectedTemplate,
             importTemplate,

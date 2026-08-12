@@ -154,9 +154,28 @@
     <!-- ======== Tab1: AI智能导入 ======== -->
     <section v-show="currentTab === 'import'" class="tab-content">
         <h2>✨ AI 智能导入</h2>
-        <p class="section-desc">把整份简历草稿粘贴进来，AI 自动识别并导入到经历管理</p>
+        <p class="section-desc">三种方式把经历录入：导入简历文件 / AI 采集提示词 / 直接粘贴草稿</p>
+        <!-- 方式一：已有简历文件导入 -->
+        <div class="card">
+            <h3>📄 方式一：导入已有简历文件</h3>
+            <p class="field-hint">支持 PDF / Word（.docx / .doc），自动提取文字填入下方输入框，再走 AI 解析。扫描件/图片型 PDF 暂不支持。</p>
+            <input type="file" ref="resumeFileInput" accept=".pdf,.docx,.doc" style="display:none" @change="importResumeFile">
+            <button class="btn btn-outline" @click="resumeFileInput.click()" :disabled="fileImporting">
+                {{ fileImporting ? '⏳ 提取文字中...' : '📄 上传简历文件' }}
+            </button>
+        </div>
+
+        <!-- 方式二：AI 采集提示词（防编造） -->
+        <div class="card">
+            <h3>📝 方式二：AI 采集提示词（防编造）</h3>
+            <p class="field-hint">复制下方提示词 → 去豆包/任意大模型粘贴 → 按提示词说出你的经历 → 把 AI 返回的 JSON 粘到下方输入框，解析零出错。</p>
+            <button class="btn btn-outline" @click="copyCollectPrompt" :disabled="collectingPrompt">
+                {{ collectingPrompt ? '⏳ 获取中...' : '📝 一键复制采集提示词' }}
+            </button>
+        </div>
+
         <div class="card highlight-card">
-            <h3>📋 粘贴简历草稿</h3>
+            <h3>📋 方式三：粘贴简历草稿 / 采集结果</h3>
             <p class="field-hint">支持识别：基本信息、教育、工作/实习经历、项目、技能、获奖、自我评价</p>
             <textarea v-model="pasteText" rows="12" placeholder="示例：
 姓名：张三 | 电话：13800138000 | 邮箱：zhangsan@email.com

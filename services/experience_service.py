@@ -276,3 +276,49 @@ class ExperienceService:
 
 
 experience_service = ExperienceService()
+
+
+# ========== 导入分类兜底：证书/资格/等级类误入技能区时自动纠正 ==========
+
+_CERT_KEYWORDS = (
+    "资格", "从业", "执业", "执照", "驾照", "驾驶证", "普通话",
+    "CET", "雅思", "托福", "IELTS", "TOEFL", "CFA", "CPA", "ACCA",
+    "职称", "等级", "四六级",
+)
+
+
+def _is_cert_like(name: str, evidence: str = "") -> bool:
+    """判断某条技能条目是否实际是证书/资格/等级类（应归入 other_info）"""
+    blob = (name + " " + evidence).upper()
+    if any(k in blob for k in _CERT_KEYWORDS):
+        return True
+    if name.upper().endswith("证"):  # 会计证、教师资格证、证券从业资格证……
+        return True
+    return False
+
+
+def sanitize_classification(result: dict) -> dict:
+    """AI 解析结果兜底：把误入 skills 的证书/资格/等级类条目移到 others。
+
+    入参为 parse-text 返回的结构（含 skills/others 列表），原地修正并返回。
+    纯规则判断，不调用 AI，不抛异常。
+    """
+    skills = result.get("skills") or []
+    others = result.get("others") or []
+    kept, moved = [], []
+    for s in skills:
+        name = (s.get("name") or "").strip()
+        evidence = (s.get("evidence") or "").strip()
+        level = (s.get("level") or "").strip()
+        if not name:
+            continue
+        if _is_cert_like(name, evidence):
+            parts = [p for p in (level, evidence) if p]
+            content = "，".join(parts)
+            moved.append({"title": name, "content": content})
+        else:
+            kept.append(s)
+    result["skills"] = kept
+    result["others"] = list(others) + moved
+    return result
+

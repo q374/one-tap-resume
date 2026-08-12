@@ -25,7 +25,7 @@ from core import database as core_db
 from core.database import db
 from core.models import BasicInfo, Education, Internship, Project, Skill, Award, SelfEvaluation, InterviewSession, OtherInfo
 from core.deepseek_client import call_deepseek, call_deepseek_json
-from services.experience_service import experience_service
+from services.experience_service import experience_service, sanitize_classification
 from services.resume_service import resume_service
 from services.jd_service import jd_service
 from services.industry_service import industry_service
@@ -218,7 +218,7 @@ async def parse_text(data: ParseTextInput):
     """AI 解析用户粘贴的经历文本为结构化数据"""
     prompt = EXPERIENCE_PARSE_PROMPT.format(user_text=data.text)
     try:
-        result = await call_deepseek_json(prompt)
+        result = sanitize_classification(await call_deepseek_json(prompt))
         return result
     except Exception:
         raise HTTPException(500, "AI 解析暂不可用，请稍后重试")

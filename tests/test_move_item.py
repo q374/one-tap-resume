@@ -72,5 +72,5 @@ def test_api_move(test_db):
 def test_parse_prompt_strict_skill_rule():
     from prompts.experience_parse import EXPERIENCE_PARSE_PROMPT
     assert "技能字段严格限定" in EXPERIENCE_PARSE_PROMPT
-    assert "CET-4/6、雅思、托福、普通话等级" in EXPERIENCE_PARSE_PROMPT
+    assert "CET-4/CET-6、雅思、托福、驾照/驾驶证" in EXPERIENCE_PARSE_PROMPT
     assert "放入 skills" in EXPERIENCE_PARSE_PROMPT

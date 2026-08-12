@@ -1,56 +1,59 @@
-@echo off
-title ¼òÀú¶¨ÖÆ¹¤¾ß - Æô¶¯Æ÷
-setlocal
-
-cd /d "%~dp0"
-set "APP_DIR=%CD%"
-set "URL=http://127.0.0.1:8765"
-
-rem ===== ¼ì²é·þÎñÊÇ·ñÒÑÔÚÔËÐÐ =====
-netstat -ano | findstr ":8765" | findstr "LISTENING" >nul 2>&1
-if not errorlevel 1 (
-    echo [ÌáÊ¾] ¹¤¾ßÒÑÔÚÔËÐÐ£¬ÕýÔÚ´ò¿ªä¯ÀÀÆ÷...
-    start "" "%URL%"
-    exit /b
-)
-
-rem ===== ¼ì²é Python =====
-set "PY_CMD=python"
-where python >nul 2>&1
-if errorlevel 1 (
-    set "PY_CMD=py"
-    where py >nul 2>&1
-    if errorlevel 1 (
-        echo [´íÎó] Î´ÕÒµ½ Python£¬ÇëÏÈ°²×° Python ²¢¹´Ñ¡ Add to PATH¡£
-        pause
-        exit /b 1
-    )
-)
-
-echo.
-echo   ============================================
-echo      ¼òÀú¶¨ÖÆ¹¤¾ß  ÕýÔÚÆô¶¯£¬ÇëÉÔºò...
-echo      ÇëÎð¹Ø±Õµ¯³öµÄ·þÎñ´°¿Ú£¨¹Øµô¼´Í£Ö¹·þÎñ£©
-echo   ============================================
-echo.
-
-start "¼òÀú¶¨ÖÆ¹¤¾ß - ¹Ø±Õ´Ë´°¿Ú¼´Í£Ö¹·þÎñ" cmd /k "%PY_CMD% app.py"
-
-rem ===== µÈ´ý·þÎñ¾ÍÐ÷£¨×î¶à 25 Ãë£© =====
-set /a tries=0
-:waitloop
-timeout /t 1 /nobreak >nul
-netstat -ano | findstr ":8765" | findstr "LISTENING" >nul 2>&1
-if not errorlevel 1 goto ready
-set /a tries+=1
-if %tries% lss 25 goto waitloop
-
-echo [´íÎó] ·þÎñÆô¶¯³¬Ê±£¬Çë²é¿´·þÎñ´°¿ÚÖÐµÄ±¨´íÐÅÏ¢¡£
-pause
-exit /b 1
-
-:ready
-echo [³É¹¦] ¹¤¾ßÒÑÆô¶¯£¬ÕýÔÚ´ò¿ªä¯ÀÀÆ÷...
-start "" "%URL%"
-timeout /t 1 /nobreak >nul
-exit /b 0
+@echo off
+title ç®€åŽ†å®šåˆ¶å·¥å…· - å¯åŠ¨å™¨
+chcp 65001 >nul 2>&1
+setlocal
+
+cd /d "%~dp0"
+set "APP_DIR=%CD%"
+set "URL=http://127.0.0.1:8765"
+
+rem ===== æ¸…ç†æ®‹ç•™ï¼šç»“æŸå ç”¨ 8765 ç«¯å£çš„è¿›ç¨‹ï¼ˆä¸Šæ¬¡å¼‚å¸¸å…³é—­å¯èƒ½æ®‹ç•™ï¼Œå¯¼è‡´å¯åŠ¨å¤±è´¥ï¼‰=====
+echo [å‡†å¤‡] æ£€æŸ¥å¹¶æ¸…ç†æ®‹ç•™æœåŠ¡...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8765" ^| findstr "LISTENING"') do (
+    taskkill /f /pid %%a >nul 2>&1
+)
+
+rem ===== æ£€æŸ¥ Python =====
+set "PY_CMD=python"
+where python >nul 2>&1
+if errorlevel 1 (
+    set "PY_CMD=py"
+    where py >nul 2>&1
+    if errorlevel 1 (
+        echo [é”™è¯¯] æœªæ‰¾åˆ° Pythonï¼Œè¯·å…ˆå®‰è£… Python å¹¶å‹¾é€‰ Add to PATHã€‚
+        pause
+        exit /b 1
+    )
+)
+
+echo.
+echo   ============================================
+echo      ç®€åŽ†å®šåˆ¶å·¥å…·  æ­£åœ¨å¯åŠ¨ï¼Œè¯·ç¨å€™...
+echo      è¯·å‹¿å…³é—­å¼¹å‡ºçš„æœåŠ¡çª—å£ï¼ˆå…³æŽ‰å³åœæ­¢æœåŠ¡ï¼‰
+echo   ============================================
+echo.
+
+start "ç®€åŽ†å®šåˆ¶å·¥å…· - å…³é—­æ­¤çª—å£å³åœæ­¢æœåŠ¡" cmd /k "%PY_CMD% app.py"
+
+rem ===== ç­‰å¾…æœåŠ¡å°±ç»ªï¼ˆæœ€å¤š 30 ç§’ï¼‰=====
+set /a tries=0
+:waitloop
+rem timeout åœ¨ä¸ªåˆ«çŽ¯å¢ƒå¯èƒ½ç›´æŽ¥è¿”å›žï¼Œå¤±è´¥æ—¶ç”¨ ping å»¶æ—¶å…œåº•
+timeout /t 1 /nobreak >nul 2>&1 || ping -n 2 127.0.0.1 >nul 2>&1
+rem ä¼˜å…ˆ HTTP æŽ¢æµ‹ï¼ˆèƒ½ç¡®è®¤æœåŠ¡çœŸæ­£å¯è®¿é—®ï¼‰ï¼›æ—  curl æ—¶é€€å›žç«¯å£æ£€æµ‹
+curl -s -o nul "%URL%/" >nul 2>&1
+if not errorlevel 1 goto ready
+netstat -ano | findstr ":8765" | findstr "LISTENING" >nul 2>&1
+if not errorlevel 1 goto ready
+set /a tries+=1
+if %tries% lss 30 goto waitloop
+
+echo [é”™è¯¯] æœåŠ¡å¯åŠ¨è¶…æ—¶ï¼Œè¯·æŸ¥çœ‹æœåŠ¡çª—å£ä¸­çš„æŠ¥é”™ä¿¡æ¯ã€‚
+pause
+exit /b 1
+
+:ready
+echo [æˆåŠŸ] å·¥å…·å·²å¯åŠ¨ï¼Œæ­£åœ¨æ‰“å¼€æµè§ˆå™¨...
+start "" "%URL%"
+timeout /t 1 /nobreak >nul 2>&1
+exit /b 0

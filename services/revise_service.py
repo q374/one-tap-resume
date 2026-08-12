@@ -233,6 +233,113 @@ class ReviseService:
 
         return html_content, "修改成功"
 
+    async def expand(self, current_html: str, jd_text: str = "") -> tuple[str | None, str]:
+        """AI 自动扩写：内容不足一页时，基于真实经历把描述写得更饱满（不编造事实）
+
+        返回: (expanded_html, message)
+        """
+        if not current_html or not current_html.strip():
+            return None, "简历内容为空"
+
+        current_html = _accept_revision(current_html)
+        images, html_noimg = _extract_base64_images(current_html)
+        css_blocks, html_clean = _extract_css(html_noimg)
+
+        prompt = f"""你是一个简历内容丰富化助手。当前简历内容不足 A4 一页，请基于现有真实内容扩写，使内容更饱满、接近一页。
+
+【扩写策略】（按优先级）
+1. 每条项目/实习要点补充更多细节：具体场景、执行过程、使用的方法与工具、量化结果
+2. 项目经历若要点不足 3 条，补充到 3-4 条（用已有信息合理展开）
+3. 技能区每条技能补充简短说明（不超过8字）
+4. 自我评价扩写到 2-3 句话
+5. 教育背景、实习经历、获奖情况可补充时间、职责等合理描述
+
+【真实性铁律】
+- 只基于简历中已有的信息扩写句式与表述，把话说完整、说具体
+- **禁止新增任何具体数字、项目、公司、学校、奖项、证书等事实性信息**
+- 禁止编造经历、禁止无中生有
+
+【格式铁律 - 违反即失败】
+1. **禁止修改 <!--CSS_BLOCK_N--> 注释**（样式占位符）
+2. **禁止修改 ##IMG_PLACEHOLDER_N## 标记**（图片占位符）
+3. **禁止修改 HTML 标签名和 class 属性值**，禁止添加 inline style
+4. **禁止删除 html/head/body 等外层结构标签**
+5. **禁止出现任何 Markdown 标记（**、*、#）**
+6. 直接输出扩写后的完整 HTML，不要用 del/ins 标记，不要任何解释
+
+【目标岗位JD】（用于组织扩写侧重点）
+{jd_text or "（无，按通用简历标准）"}
+
+【当前简历HTML】
+{html_clean}"""
+
+        try:
+            html_content = await call_deepseek(prompt, max_tokens=16384)
+        except Exception as e:
+            return None, f"API调用失败: {str(e)}"
+        if not html_content:
+            return None, "API返回空内容"
+
+        html_content = clean_html_response(html_content)
+        html_content = _restore_css(html_content, css_blocks)
+        html_content = _restore_base64_images(html_content, images)
+
+        is_valid, issues = _validate_structure(current_html, html_content)
+        return html_content, "扩写成功"
+
+    async def trim(self, current_html: str, jd_text: str = "") -> tuple[str | None, str]:
+        """AI 自动精简简历以适配一页（直接输出干净HTML，无 diff 标记）
+
+        返回: (trimmed_html, message)
+        """
+        if not current_html or not current_html.strip():
+            return None, "简历内容为空"
+
+        # 先清掉可能残留的 diff 标记，保证干净输入
+        current_html = _accept_revision(current_html)
+
+        # 抽取 base64 图片与 CSS（保护机制，与 revise 一致）
+        images, html_noimg = _extract_base64_images(current_html)
+        css_blocks, html_clean = _extract_css(html_noimg)
+
+        prompt = f"""你是一个简历精简助手。当前简历内容超出 A4 一页，请自动精简使它刚好能放进一页。
+
+【精简策略】（按优先级执行）
+1. 优先删除 P2 次要模块（获奖、证书、社团活动等非核心模块），可整体删除整个模块（含其 h2 标题和内容）
+2. 项目/实习经历最多保留 3 条与目标岗位最相关的，其余整个条目删除
+3. 每条要点压缩到最短：删掉修饰词、合并重复信息，保留量化成果和关键动作
+4. 技能区只保留最相关的 6-8 项
+5. 自我评价压缩到一句话
+6. 只删减/压缩已有内容，绝不编造任何数据、经历或技能
+
+【格式铁律 - 违反即失败】
+1. **禁止修改 <!--CSS_BLOCK_N--> 注释**（样式占位符）
+2. **禁止修改 ##IMG_PLACEHOLDER_N## 标记**（图片占位符）
+3. **禁止修改 HTML 标签名和 class 属性值**，禁止添加 inline style
+4. **禁止删除 html/head/body 等外层结构标签**
+5. **禁止出现任何 Markdown 标记（**、*、#）**
+6. 直接输出精简后的完整 HTML，不要用 del/ins 标记，不要任何解释
+
+【目标岗位JD】（用于判断哪些内容最相关）
+{jd_text or "（无，按通用简历标准精简）"}
+
+【当前简历HTML】
+{html_clean}"""
+
+        try:
+            html_content = await call_deepseek(prompt, max_tokens=16384)
+        except Exception as e:
+            return None, f"API调用失败: {str(e)}"
+        if not html_content:
+            return None, "API返回空内容"
+
+        html_content = clean_html_response(html_content)
+        html_content = _restore_css(html_content, css_blocks)
+        html_content = _restore_base64_images(html_content, images)
+
+        is_valid, issues = _validate_structure(current_html, html_content)
+        return html_content, "精简成功"
+
     def accept(self, html_content: str) -> str | None:
         """接受所有修改，返回干净的HTML"""
         if not html_content:

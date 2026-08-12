@@ -42,6 +42,13 @@
         <h2>📝 经历管理</h2>
         <p class="section-desc">经历库只需录入一次，生成不同岗位简历时自动匹配复用</p>
 
+        <!-- 测试工具：一键清空经历库（仅测试用，发布前删除） -->
+        <div class="card" style="background:#fff8e1;border:1px dashed #f0b429;">
+            <h3>🧪 测试工具（仅测试用）</h3>
+            <p class="field-hint">一键清空全部经历数据（基本信息/教育/实习/项目/技能/获奖/自我评价），用于从零测试。操作不可恢复！</p>
+            <button @click="clearAllExperience" class="btn btn-danger">🗑 一键清空经历库</button>
+        </div>
+
         <!-- 基本信息 -->
         <div class="card">
             <h3>基本信息</h3>
@@ -102,6 +109,10 @@
                     <div class="item-actions">
                         <button @click="startEdit(mod.key, item)" class="btn-small">编辑</button>
                         <button @click="deleteItem(mod.key, item.id)" class="btn-small btn-danger">删除</button>
+                        <select class="move-select" @change="moveItem(mod.key, item.id, $event.target.value); $event.target.value='';" title="分错模块？移到其他模块">
+                            <option value="">移动</option>
+                            <option v-for="t in otherModules(mod.key)" :key="t.key" :value="t.key">→ {{ t.label }}</option>
+                        </select>
                     </div>
                 </div>
                 <!-- 编辑模式：分字段表单 -->
@@ -306,6 +317,26 @@ ACM-ICPC亚洲区域赛 银奖 2022
             <div v-if="result.industry" style="margin-bottom:8px">
                 <span class="jd-tag jd-tag-nice">🧭 已按「{{ result.industry }}」行业侧重点生成</span>
             </div>
+
+            <!-- 经历-岗位匹配度预警 -->
+            <div v-if="result.match_info && result.match_info.level && result.match_info.level !== 'unknown'"
+                 class="card" style="margin-bottom:12px" :class="matchCardClass">
+                <h3>{{ matchCardTitle }}</h3>
+                <div class="match-score-row">
+                    <span class="match-score">{{ result.match_info.score }}<em>分</em></span>
+                    <span class="match-detail">JD关键词命中 {{ result.match_info.matched.length }}/{{ result.match_info.total }}</span>
+                </div>
+                <div v-if="result.match_info.missing_keywords && result.match_info.missing_keywords.length" class="match-missing">
+                    <span class="match-missing-label">岗位要求你暂未覆盖：</span>
+                    <span v-for="kw in result.match_info.missing_keywords" :key="kw" class="jd-tag jd-tag-hard">{{ kw }}</span>
+                </div>
+                <p v-if="result.match_info.level === 'low' || result.match_info.level === 'medium'" class="hint" style="margin-top:6px">
+                    ✨ 已自动启用「匹配增强模式」：AI 会按岗位视角重新提炼现有经历（<b>不编造</b>），并补强技能区 / 自我评价等模块。
+                </p>
+                <div class="btn-group" style="margin-top:8px">
+                    <button @click="switchTab('experience')" class="btn btn-outline btn-sm">📝 去经历管理补录</button>
+                </div>
+            </div>
             <div v-if="result.resume_issues && result.resume_issues.length" class="card warning-card">
                 <h3>⚠️ 注意事项</h3>
                 <ul><li v-for="issue in result.resume_issues" :key="issue">{{ issue }}</li></ul>
@@ -318,7 +349,9 @@ ACM-ICPC亚洲区域赛 银奖 2022
                     <button @click="jumpToInterviewTab" class="btn btn-outline">🎤 模拟面试</button>
                     <button @click="submitDelivery" class="btn btn-outline">📬 投递此岗位</button>
                 </div>
-                <iframe :srcdoc="result.resume_html" class="resume-iframe" id="resumeFrame"></iframe>
+                <div v-if="fitNotice" class="fit-notice" :class="fitNoticeClass">{{ fitNotice }}</div>
+                <div class="resume-preview" id="resumePreview"></div>
+                <iframe id="resumePrintFrame" class="print-frame" title="打印"></iframe>
             </div>
 
             <!-- 简历质量诊断 -->

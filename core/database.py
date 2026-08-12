@@ -113,6 +113,13 @@ class Database:
                 content TEXT DEFAULT ''
             );
 
+            CREATE TABLE IF NOT EXISTS other_info (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT DEFAULT '',
+                content TEXT DEFAULT '',
+                sort_order INTEGER DEFAULT 0
+            );
+
             CREATE TABLE IF NOT EXISTS user_templates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT DEFAULT '',

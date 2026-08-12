@@ -6,6 +6,8 @@ from prompts.resume_generation import build_resume_prompt
 from services.html_cleaner import clean_html_response, validate_html, validate_content_authenticity
 from services.template_filler import fill_custom_template
 from services.industry_service import industry_service
+from services.match_service import compute_match, build_match_context
+from services.experience_service import strip_markdown
 from config import BASE_DIR
 
 PHOTO_MARKER = '__PHOTO_BASE64__'
@@ -16,6 +18,9 @@ class ResumeService:
                        jd_text: str, photo_path: str = "",
                        industry_override: str = "") -> dict:
         """生成简历 HTML，返回 {html, valid, issues, industry}"""
+        # 清除经历文本中的 Markdown 残留（** 等），防止污染输出
+        experience_text = strip_markdown(experience_text)
+
         # 行业侧重点分析（降级铁律：失败不影响简历生成）
         industry_ctx = ""
         industry_name = ""
@@ -29,12 +34,21 @@ class ResumeService:
             industry_ctx = ""
             industry_name = ""
 
+        # 经历-岗位匹配度（低/中匹配时触发增强模式，失败不影响生成）
+        match_info = {"score": None, "level": "unknown", "missing_keywords": [], "total": 0, "detail": ""}
+        match_ctx = ""
+        try:
+            match_info = compute_match(experience_text, jd_text)
+            match_ctx = build_match_context(match_info)
+        except Exception:
+            pass
+
         # 年龄指令
         age_match = re.search(r'年龄[^0-9]*(\d+)', experience_text)
         age_directive = (
             f'年龄字段已提供，值为：{age_match.group(1)}。请将{{{{年龄}}}}占位符替换为<span class="age-normal">{age_match.group(1)}</span>。'
             if age_match else
-            '年龄字段未提供，请将{{{{年龄}}}}占位符替换为<span class="editable-placeholder" contenteditable="true">请输入你的年龄</span>。'
+            '年龄字段未提供，请将{{{{年龄}}}}占位符替换为<span class="age-placeholder" data-placeholder="请输入你的年龄" contenteditable="true"></span>。'
         )
 
         # 照片：模板中用占位符，AI 生成后替换（避免 base64 截断）
@@ -69,7 +83,7 @@ class ResumeService:
             # 自定义模板：用 filler 管道（AI只出文本，代码负责拼回HTML）
             html_content = await fill_custom_template(
                 template_html, experience_text, jd_text,
-                industry_context=industry_ctx,
+                industry_context=(industry_ctx + "\n" + match_ctx) if match_ctx else industry_ctx,
             )
             if not html_content:
                 return {"html": None, "valid": False, "issues": ["模板填充失败"]}
@@ -83,6 +97,7 @@ class ResumeService:
                 photo_directive=photo_directive,
                 has_placeholders=True,
                 industry_context=industry_ctx,
+                match_context=match_ctx,
             )
 
             html_content = await call_deepseek(prompt, max_tokens=16384)
@@ -109,6 +124,7 @@ class ResumeService:
             "valid": valid and content_ok,
             "issues": issues,
             "industry": industry_name,
+            "match_info": match_info,
         }
 
 

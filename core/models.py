@@ -137,6 +137,23 @@ class SelfEvaluation:
             return cls()
         return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k in row.keys()})
 
+
+@dataclass
+class OtherInfo:
+    id: Optional[int] = None
+    title: str = ""
+    content: str = ""
+    sort_order: int = 0
+
+    def to_dict(self):
+        d = asdict(self)
+        return d
+
+    @classmethod
+    def from_row(cls, row):
+        if row is None:
+            return cls()
+        return cls(**{k: row[k] for k in cls.__dataclass_fields__ if k in row.keys()})
 @dataclass
 class UserTemplate:
     id: Optional[int] = None

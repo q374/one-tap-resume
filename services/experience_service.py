@@ -1,5 +1,7 @@
+import re
+
 from core.database import db
-from core.models import BasicInfo, Education, Internship, Project, Skill, Award, SelfEvaluation
+from core.models import BasicInfo, Education, Internship, Project, Skill, Award, SelfEvaluation, OtherInfo
 
 _MODEL_MAP = {
     "education": (Education, "education"),
@@ -7,7 +9,38 @@ _MODEL_MAP = {
     "projects": (Project, "projects"),
     "skills": (Skill, "skills"),
     "awards": (Award, "awards"),
+    "others": (OtherInfo, "other_info"),
 }
+
+# 跨模块移动：各模块的「主字段」（移动时作为目标模块的名称/标题）
+_MAIN_FIELD = {
+    "education": "school",
+    "internships": "company",
+    "projects": "name",
+    "skills": "name",
+    "awards": "name",
+    "others": "title",
+}
+
+# 跨模块移动：各模块的「内容字段」（源其余字段合并后填入）
+_CONTENT_FIELD = {
+    "education": "major",
+    "internships": "description",
+    "projects": "results",
+    "skills": "evidence",
+    "awards": "level",
+    "others": "content",
+}
+
+def strip_markdown(text: str) -> str:
+    """清除经历文本中的 Markdown 残留标记（**、反引号、行首列表符）"""
+    if not text:
+        return text
+    text = text.replace('**', '')
+    text = text.replace('`', '')
+    text = re.sub(r'(?m)^\s*[-*+]\s+', '', text)
+    return text
+
 
 class ExperienceService:
     # === Basic Info ===
@@ -38,6 +71,7 @@ class ExperienceService:
         return [model_class.from_row(r) for r in rows]
 
     def _add(self, item, table_name: str) -> int:
+        item = self._clean_item(item)
         d = item.to_dict()
         columns = ", ".join(d.keys())
         placeholders = ", ".join(["?"] * len(d))
@@ -50,6 +84,7 @@ class ExperienceService:
         return item_id
 
     def _update(self, item, table_name: str) -> None:
+        item = self._clean_item(item)
         d = item.to_dict()
         item_id = d.pop("id") if "id" in d else item.id
         if not item_id:
@@ -60,6 +95,14 @@ class ExperienceService:
                 f"UPDATE {table_name} SET {set_clause} WHERE id=?",
                 list(d.values()) + [item_id]
             )
+
+    def _clean_item(self, item):
+        """对条目内所有字符串字段做 Markdown 清洗"""
+        d = item.to_dict()
+        for k, v in d.items():
+            if isinstance(v, str):
+                d[k] = strip_markdown(v)
+        return item.__class__(**d)
 
     def _delete(self, table_name: str, item_id: int) -> None:
         with db.connection() as conn:
@@ -94,6 +137,48 @@ class ExperienceService:
     def add_award(self, item: Award) -> int: return self._add(item, "awards")
     def update_award(self, item: Award): self._update(item, "awards")
     def delete_award(self, id: int): self._delete("awards", id)
+
+    # === Others ===
+    def list_others(self): return self._list(OtherInfo, "other_info")
+    def add_other(self, item: OtherInfo) -> int: return self._add(item, "other_info")
+    def update_other(self, item: OtherInfo): self._update(item, "other_info")
+    def delete_other(self, id: int): self._delete("other_info", id)
+
+    # === Move across modules ===
+    def move_item(self, from_module: str, item_id: int, to_module: str) -> int:
+        """把一条经历从 from_module 移动到 to_module。
+
+        映射规则：源主字段 → 目标主字段（名称/标题）；源其余非空字段合并进目标内容字段。
+        """
+        if from_module not in _MODEL_MAP or to_module not in _MODEL_MAP:
+            raise ValueError(f"未知模块: {from_module} -> {to_module}")
+        if from_module == to_module:
+            return item_id
+        from_model, from_table = _MODEL_MAP[from_module]
+        to_model, to_table = _MODEL_MAP[to_module]
+        with db.connection() as conn:
+            row = conn.execute(f"SELECT * FROM {from_table} WHERE id=?", (item_id,)).fetchone()
+            if row is None:
+                raise ValueError("条目不存在")
+            src = {k: row[k] for k in row.keys()}
+            src_main_field = _MAIN_FIELD.get(from_module)
+            src_main = src.get(src_main_field) or next((v for v in src.values() if v), "")
+            rest = [str(v) for k, v in src.items()
+                    if v and k not in ("id", "sort_order", src_main_field)]
+            merged = "；".join(rest)
+            target_main = _MAIN_FIELD.get(to_module)
+            target_content = _CONTENT_FIELD.get(to_module)
+            new_data = {target_main: src_main}
+            if target_content:
+                new_data[target_content] = merged
+            new_item = to_model(**new_data)
+            d = new_item.to_dict()
+            cols = ", ".join(d.keys())
+            ph = ", ".join(["?"] * len(d))
+            cur = conn.execute(
+                f"INSERT INTO {to_table} ({cols}) VALUES ({ph})", list(d.values()))
+            conn.execute(f"DELETE FROM {from_table} WHERE id=?", (item_id,))
+            return cur.lastrowid
 
     # === Self Evaluation ===
     def get_self_evaluation(self) -> SelfEvaluation:
@@ -171,12 +256,20 @@ class ExperienceService:
             for award in award_list:
                 sections.append(f"{award.name}，{award.level}，{award.date}")
 
+        other_list = self.list_others()
+        if other_list:
+            sections.append("\n其他信息：")
+            for other in other_list:
+                suffix = f"：{other.content}" if other.content else ""
+                sections.append(f"{other.title}{suffix}")
+
         ev = self.get_self_evaluation()
         if ev.content:
             sections.append(f"\n自我评价：\n{ev.content}")
 
+        text = strip_markdown("\n".join(sections))
         return {
-            "text": "\n".join(sections),
+            "text": text,
             "has_photo": bool(info.photo_path),
             "photo_path": info.photo_path,
         }

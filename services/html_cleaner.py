@@ -68,6 +68,16 @@ def clean_html_response(html_content):
     for phrase, replacement in unprofessional_phrases.items():
         html_content = html_content.replace(phrase, replacement)
 
+    # 兜底：清除 AI 误写入可见文本的 Markdown 粗体标记（**xxx** 应已由 <strong> 实现）
+    html_content = html_content.replace('**', '')
+
+    # 剥离项目要点开头的"标签："前缀（经验总结：/核心动作：/量化成果：/技术工具：等）
+    html_content = re.sub(
+        r'(<strong>|<li>)\s*(核心动作|量化成果|技术工具|技术/工具|背景与动作|经验总结|数据支持)\s*[:：]\s*',
+        r'\1',
+        html_content
+    )
+
     return html_content
 
 

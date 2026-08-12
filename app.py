@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 
 # 确保项目根目录在 Python 路径中
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -22,12 +23,13 @@ from datetime import datetime
 from config import BASE_DIR
 from core import database as core_db
 from core.database import db
-from core.models import BasicInfo, Education, Internship, Project, Skill, Award, SelfEvaluation, InterviewSession
+from core.models import BasicInfo, Education, Internship, Project, Skill, Award, SelfEvaluation, InterviewSession, OtherInfo
 from core.deepseek_client import call_deepseek, call_deepseek_json
 from services.experience_service import experience_service
 from services.resume_service import resume_service
 from services.jd_service import jd_service
 from services.industry_service import industry_service
+from services.match_service import compute_match
 from services.template_service import template_service
 from services.ocr_service import ocr_service
 from services.export_service import export_service
@@ -109,6 +111,7 @@ async def get_all_experiences():
         "projects": [p.to_dict() for p in experience_service.list_projects()],
         "skills": [s.to_dict() for s in experience_service.list_skills()],
         "awards": [a.to_dict() for a in experience_service.list_awards()],
+        "others": [o.to_dict() for o in experience_service.list_others()],
         "self_evaluation": experience_service.get_self_evaluation().to_dict(),
     }
 
@@ -190,6 +193,22 @@ async def save_self_eval(request: Request):
     experience_service.save_self_evaluation(ev)
     return {"status": "ok"}
 
+# 跨模块移动
+class MoveItemInput(BaseModel):
+    from_module: str
+    item_id: int
+    to_module: str
+
+@app.post("/api/experiences/move")
+async def move_experience_item(data: MoveItemInput):
+    """跨模块移动经历条目（如技能里的证书 → 其他信息）"""
+    try:
+        new_id = experience_service.move_item(data.from_module, data.item_id, data.to_module)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"status": "ok", "id": new_id}
+
+
 # AI parse pasted text
 class ParseTextInput(BaseModel):
     text: str
@@ -208,6 +227,149 @@ async def parse_text(data: ParseTextInput):
 class DedupInput(BaseModel):
     module: str
     new_text: str
+
+class ImportCheckRequest(BaseModel):
+    items: dict
+
+
+@app.post("/api/experiences/clear-all")
+async def clear_all_experiences():
+    """[测试专用] 一键清空所有经历数据（发布上线前删除此接口）"""
+    tables = ["basic_info", "education", "internships", "projects",
+              "skills", "awards", "other_info", "self_evaluation"]
+    with db.connection() as conn:
+        for t in tables:
+            conn.execute(f"DELETE FROM {t}")
+    return {"status": "ok", "cleared": tables}
+
+
+@app.post("/api/experiences/import-check")
+async def import_check(data: ImportCheckRequest):
+    """AI 导入前去重：本地精确去重（归一化比较），返回重复项列表
+
+    入参 items = parse-text 解析出的完整结构。
+    对每个模块的新条目，与已有经历做"去空白/标点/大小写"归一化比较，
+    完全相同的标记为重复。零 AI 成本，导入一模一样的经历会被拦下。
+    """
+    items = data.items or {}
+    duplicates = []
+    # parse-text 返回 key -> (表名, 去重字段, 展示名称字段)
+    mapping = {
+        "education": ("education", ["school", "major", "degree"], "school"),
+        "work_experience": ("internships", ["company", "position"], "company"),
+        "projects": ("projects", ["name"], "name"),
+        "skills": ("skills", ["name"], "name"),
+        "awards": ("awards", ["name"], "name"),
+        "others": ("others", ["title"], "title"),
+    }
+
+    def _norm(s):
+        if not s:
+            return ""
+        return re.sub(r"[\s，。、；：:,.!?！？\"\"''\-—|·]+", '', str(s)).lower()
+
+    total = 0
+    for api_key, (table, fields, name_field) in mapping.items():
+        new_items = items.get(api_key) or []
+        if not new_items:
+            continue
+        existing = getattr(experience_service, f"list_{table}")()
+        existing_keys = set()
+        for e in existing:
+            key = "".join(str(getattr(e, f, "") or "") for f in fields)
+            existing_keys.add(_norm(key))
+        for idx, ni in enumerate(new_items):
+            if not isinstance(ni, dict):
+                continue
+            total += 1
+            key = "".join(str(ni.get(f, "") or "") for f in fields)
+            norm_key = _norm(key)
+            if norm_key and norm_key in existing_keys:
+                duplicates.append({
+                    "module": table,
+                    "index": idx,
+                    "name": str(ni.get(name_field, "") or ""),
+                    "reason": "与已有内容完全相同",
+                })
+    # AI 语义去重（仅 projects/work_experience，一次批量调用；失败降级为只用精确结果）
+    suspicious = []
+    try:
+        suspicious = await _ai_semantic_dedup(items, duplicates)
+    except Exception:
+        suspicious = []
+    return {"duplicates": duplicates, "suspicious": suspicious, "total_checked": total}
+
+
+async def _ai_semantic_dedup(items: dict, duplicates: list) -> list:
+    """对 projects / work_experience 做 AI 语义去重：文字不同但说的是同一件事
+
+    返回 suspicious 列表（疑似重复，供用户二次确认，不自动跳过）。
+    """
+    result = []
+    for api_key, table, fields, name_field in [
+        ("projects", "projects", ["name", "actions"], "name"),
+        ("work_experience", "internships", ["company", "position"], "company"),
+    ]:
+        new_items = items.get(api_key) or []
+        if not new_items:
+            continue
+        dup_indexes = {d["index"] for d in duplicates if d["module"] == table}
+        remaining = [(i, ni) for i, ni in enumerate(new_items)
+                     if isinstance(ni, dict) and i not in dup_indexes]
+        if not remaining:
+            continue
+        existing = getattr(experience_service, f"list_{table}")()
+        if not existing:
+            continue
+
+        def _line(i, name, extra):
+            return f"{i}. {name}：{extra}"
+
+        existing_desc = "\n".join(
+            _line(i, str(getattr(e, name_field, "") or ""),
+                  "，".join(str(getattr(e, f, "") or "") for f in fields))
+            for i, e in enumerate(existing)
+        )
+        new_desc = "\n".join(
+            _line(i, str(ni.get(name_field, "") or ""),
+                  "，".join(str(ni.get(f, "") or "") for f in fields))
+            for i, ni in remaining
+        )
+        prompt = f"""你是简历去重助手。判断以下「新条目」是否与「已有条目」说的是同一件事（语义重复，即使文字表达不同）。
+
+模块：{table}
+已有条目：
+{existing_desc}
+
+新条目：
+{new_desc}
+
+请判断每个新条目是否与某个已有条目语义重复（描述的是同一个项目/同一段经历）。
+只返回重复项，每个重复项一行，格式严格为：
+{{"module": "{table}", "index": 新条目序号, "match": 对应的已有条目名称}}
+没有重复就什么都不返回。不要任何解释。"""
+        try:
+            raw = await call_deepseek(prompt, max_tokens=2048)
+            for line in raw.splitlines():
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue
+                try:
+                    d = json_module.loads(line)
+                except Exception:
+                    continue
+                idx = d.get("index")
+                if isinstance(idx, int) and 0 <= idx < len(new_items):
+                    result.append({
+                        "module": table,
+                        "index": idx,
+                        "name": str(new_items[idx].get(name_field, "") or ""),
+                        "reason": "与已有「%s」语义重复" % d.get("match", "经历"),
+                    })
+        except Exception:
+            continue
+    return result
+
 
 @app.post("/api/experiences/check-duplicate")
 async def check_duplicate(data: DedupInput):
@@ -232,7 +394,7 @@ async def check_duplicate(data: DedupInput):
 
 # ======== 通用 CRUD 端点（/{module} 通配符 — 放在最后） ========
 
-VALID_MODULES = ["education", "internships", "projects", "skills", "awards"]
+VALID_MODULES = ["education", "internships", "projects", "skills", "awards", "others"]
 
 @app.get("/api/experiences/{module}")
 async def list_module(module: str):
@@ -247,7 +409,7 @@ async def add_module_item(module: str, request: Request):
         raise HTTPException(404, f"Unknown module: {module}")
     model_class = {
         "education": Education, "internships": Internship,
-        "projects": Project, "skills": Skill, "awards": Award
+        "projects": Project, "skills": Skill, "awards": Award, "others": OtherInfo
     }[module]
     data = await request.json()
     item = model_class(**data)
@@ -260,7 +422,7 @@ async def update_module_item(module: str, item_id: int, request: Request):
         raise HTTPException(404, f"Unknown module: {module}")
     model_class = {
         "education": Education, "internships": Internship,
-        "projects": Project, "skills": Skill, "awards": Award
+        "projects": Project, "skills": Skill, "awards": Award, "others": OtherInfo
     }[module]
     data = await request.json()
     data["id"] = item_id
@@ -291,6 +453,19 @@ class GenerateRequest(BaseModel):
     jd_text: str
     template_type: str = "default"
     industry: str = ""  # 用户手动选择的行业，空=自动识别
+
+class MatchPreviewRequest(BaseModel):
+    jd_text: str
+
+@app.post("/api/match/preview")
+async def match_preview(req: MatchPreviewRequest):
+    """生成前匹配度预览 — 计算经历库与JD的关键词命中（不调用AI，零成本）"""
+    exp_data = experience_service.export_all()
+    experience_text = exp_data["text"]
+    if not experience_text.strip():
+        return {"score": None, "level": "unknown", "matched": [],
+                "missing_keywords": [], "total": 0, "detail": "经历库为空"}
+    return compute_match(experience_text, req.jd_text)
 
 @app.post("/api/resumes/generate")
 async def generate_resume(req: GenerateRequest):
@@ -330,6 +505,7 @@ async def generate_resume(req: GenerateRequest):
         "resume_valid": resume_result.get("valid", False),
         "resume_issues": resume_result.get("issues", []),
         "industry": resume_result.get("industry", ""),
+        "match_info": resume_result.get("match_info", {}),
     }
 
 # ==================== 简历质量诊断 ====================
@@ -1099,6 +1275,29 @@ async def revise_resume(data: ReviseRequest):
     return {"success": True, "revised_html": revised_html, "message": message}
 
 
+class AutoTrimRequest(BaseModel):
+    resume_html: str
+    jd_text: str = ""
+
+
+@app.post("/api/resumes/auto-expand")
+async def auto_expand_resume(data: AutoTrimRequest):
+    """AI 自动扩写：内容不足一页时基于真实经历扩充（不编造事实）"""
+    expanded_html, message = await revise_service.expand(data.resume_html, data.jd_text)
+    if expanded_html is None:
+        raise HTTPException(500, message)
+    return {"success": True, "revised_html": expanded_html, "message": message}
+
+
+@app.post("/api/resumes/auto-trim")
+async def auto_trim_resume(data: AutoTrimRequest):
+    """AI 自动精简简历以适配一页（直接输出干净 HTML，无 diff 标记）"""
+    trimmed_html, message = await revise_service.trim(data.resume_html, data.jd_text)
+    if trimmed_html is None:
+        raise HTTPException(500, message)
+    return {"success": True, "revised_html": trimmed_html, "message": message}
+
+
 class AcceptRevisionRequest(BaseModel):
     html_content: str
 
@@ -1112,4 +1311,6 @@ async def accept_revision(data: AcceptRevisionRequest):
 
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host="127.0.0.1", port=8765, reload=True)
+    # reload 仅开发调试用（设置环境变量 RESUME_DEV=1 开启）；
+    # 默认单进程：关掉服务窗口即彻底停止，避免残留 worker 占端口导致下次启动失败
+    uvicorn.run("app:app", host="127.0.0.1", port=8765, reload=os.environ.get("RESUME_DEV") == "1")

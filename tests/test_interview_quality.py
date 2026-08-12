@@ -1,5 +1,6 @@
-"""面试出题质量测试 — 验证JD相关性和对话自然度"""
+"""面试出题质量测试 — 验证JD相关性和对话自然度（真实DeepSeek集成测试，默认跳过）"""
 import sys, os, asyncio, json
+import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.deepseek_client import call_deepseek_json, call_deepseek
@@ -72,6 +73,12 @@ TEST_JDS = [
     }
 ]
 
+
+# 依赖真实 DeepSeek API（慢、耗token），默认跳过；需要验证出题质量时去掉 skip 或加 -m interview 运行
+pytestmark = pytest.mark.skip(reason="真实DeepSeek集成测试，默认跳过；按需运行")
+
+
+@pytest.mark.parametrize("jd_info", TEST_JDS)
 async def test_jd_questions(jd_info):
     """测试单个JD的面试题生成质量"""
     prompt = build_interview_prompt(EXPERIENCE, jd_info["jd"])

@@ -30,9 +30,11 @@
         .skills p { margin: 2px 0; }
         hr.skill-divider { margin: 1px 0; border: none; padding: 0; height: 1px; }
         .highlight { background-color: #fff3cd; color: #cc0000; padding: 0 4px; font-weight: bold; }
-        .age-normal { color: #333; font-weight: normal; background: transparent; }
+        .age-normal { color: #666; font-weight: normal; background: transparent; }
         .editable-placeholder { background-color: #fff3cd; color: #cc0000; font-weight: bold; padding: 2px 6px; border-radius: 3px; }
         .editable-placeholder:focus { background-color: transparent; color: #333; font-weight: normal; padding: 0; border-radius: 0; }
+        .age-placeholder { display: inline-block; min-width: 60px; position: relative; color: #666; }
+        .age-placeholder:empty::before { content: attr(data-placeholder); color: #aaa; font-size: 12px; }
         .editable-filled { background-color: transparent; color: #333; font-weight: normal; padding: 0; border-radius: 0; }
         
         .project-bullets { list-style: none; padding-left: 0; margin-top: 8px; }
@@ -41,7 +43,7 @@
         .project-bullets li strong { color: #333; }
         
         @media print {
-            html, body, body *:first-child, body > div:first-of-type, header, .header, .container, main {
+            html, body *:first-child, body > div:first-of-type, header, .header, .container, main {
                 margin-top: 0 !important;
                 padding-top: 0 !important;
             }
@@ -51,8 +53,7 @@
                 max-width: none;
             }
             @page {
-                margin-top: 0;
-                margin-bottom: 0;
+                margin: 0;
             }
             h2 {
                 margin-top: 8px;
@@ -81,7 +82,7 @@
         <div class="header-left">
             <h1>{{姓名}}</h1>
             <div class="info">
-                年龄：<span contenteditable="true" class="editable-placeholder">请输入你的年龄</span><br>
+                年龄：<span contenteditable="true" class="age-placeholder" data-placeholder="请输入你的年龄"></span><br>
                 电话：{{电话}}<br>
                 邮箱：{{邮箱}}<br>
                 求职意向：{{求职意向}}

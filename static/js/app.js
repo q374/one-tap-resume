@@ -1,4 +1,4 @@
-const { createApp, ref, reactive, onMounted } = Vue;
+const { createApp, ref, reactive, computed, onMounted, nextTick } = Vue;
 
 createApp({
     setup() {
@@ -62,7 +62,11 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
                 hint:'列出你掌握的技术和工具，每条标上熟练度和一句证据（如"独立开发过3个SPA项目"）'},
             {key:'awards', label:'获奖情况', icon:'🏆', items:[],
                 hint:'竞赛获奖、奖学金、荣誉称号等。编程比赛获奖放这里，编程技能放「技能」模块'},
+            {key:'others', label:'其他信息', icon:'📌', items:[],
+                hint:'证书、语言能力、培训经历、兴趣爱好等不属于以上分类的内容，每类一条'},
         ]);
+        // 模块英文 key -> 中文名（去重弹窗等展示用）
+        const MODULE_LABELS = {education:'教育背景', internships:'工作经历', work_experience:'工作经历', projects:'项目经历', skills:'技能', awards:'获奖情况', others:'其他信息'};
         const selfEval = reactive({content:''});
         const pasteText = ref('');
         const parsing = ref(false);
@@ -88,6 +92,7 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
                 modules.find(m=>m.key==='projects').items = data.projects || [];
                 modules.find(m=>m.key==='skills').items = data.skills || [];
                 modules.find(m=>m.key==='awards').items = data.awards || [];
+                modules.find(m=>m.key==='others').items = data.others || [];
                 Object.assign(selfEval, data.self_evaluation || {});
                 // 刷新照片预览
                 if (basicInfo.photo_path) {
@@ -157,6 +162,10 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
                 {key:'level', label:'奖项级别', placeholder:'例：国家级 / 省级 / 校级'},
                 {key:'date', label:'获奖时间', placeholder:'例：2023.06'},
             ],
+            others: [
+                {key:'title', label:'标题', placeholder:'例：CET-6 英语六级'},
+                {key:'content', label:'内容', placeholder:'例：2023年通过，阅读248 / 写作212'},
+            ],
         };
 
         function getFields(modKey) {
@@ -198,6 +207,19 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
             } catch(e) { alert('删除失败: ' + e.message); }
         }
 
+        // 跨模块移动：分错了模块（如技能里的证书）一键移到正确模块
+        function otherModules(modKey) {
+            return modules.filter(m => m.key !== modKey);
+        }
+        async function moveItem(fromModule, itemId, toModule) {
+            if (!toModule) return;
+            if (!confirm('确认把这条移到「' + (MODULE_LABELS[toModule] || toModule) + '」？')) { return; }
+            try {
+                await API.post('/api/experiences/move', {from_module: fromModule, item_id: itemId, to_module: toModule});
+                await loadExperiences();
+            } catch(e) { alert('移动失败: ' + e.message); }
+        }
+
         // 内联添加（展开完整字段表单）
         const addingModule = ref(null);
 
@@ -216,7 +238,7 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
             const item = {sort_order: 0};
             fields.forEach(f => { item[f.key] = editFields[f.key] || ''; });
             // 至少要有名称
-            if (!item.name && !item.school && !item.company) {
+            if (!item.name && !item.school && !item.company && !item.title) {
                 alert('请至少填写一项内容'); return;
             }
             try {
@@ -260,32 +282,65 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
             try {
                 const r = await API.post('/api/experiences/parse-text', {text: pasteText.value});
                 let count = 0;
+                // 导入前本地去重（完全重复自动跳过，用户可确认）
+                const skipSet = new Set();
+                let dupSkipped = 0;
+                try {
+                    const dup = await API.post('/api/experiences/import-check', {items: r});
+                    if (dup) {
+                        // ① 完全重复（本地精确比对，零误判）
+                        if (dup.duplicates && dup.duplicates.length > 0) {
+                            const list = dup.duplicates.slice(0, 8).map(d => '· [' + (MODULE_LABELS[d.module] || d.module) + '] ' + (d.name || d.reason)).join('\n');
+                            if (confirm('检测到 ' + dup.duplicates.length + ' 条内容与已有经历完全重复：\n\n' + list + (dup.duplicates.length > 8 ? '\n…等共 ' + dup.duplicates.length + ' 条' : '') + '\n\n点「确定」跳过重复，只导入不重复的；点「取消」全部导入。')) {
+                                for (const d of dup.duplicates) skipSet.add(d.module + ':' + d.index);
+                                dupSkipped = dup.duplicates.length;
+                            }
+                        }
+                        // ② AI 疑似语义重复（文字不同但可能同一件事）→ 用户二次确认
+                        if (dup.suspicious && dup.suspicious.length > 0) {
+                            const list = dup.suspicious.slice(0, 8).map(d => '· [' + (MODULE_LABELS[d.module] || d.module) + '] ' + (d.name || d.reason)).join('\n');
+                            if (confirm('AI 检测到以下内容可能与已有经历是同一件事（文字表述不同）：\n\n' + list + (dup.suspicious.length > 8 ? '\n…等共 ' + dup.suspicious.length + ' 条' : '') + '\n\n是否也跳过这些？')) {
+                                for (const d of dup.suspicious) skipSet.add(d.module + ':' + d.index);
+                                dupSkipped += dup.suspicious.length;
+                            }
+                        }
+                    }
+                } catch(e) { /* 去重失败不阻断导入 */ }
                 if (r.basic_info && r.basic_info.name) {
                     await API.post('/api/experiences/basic-info', r.basic_info);
                 }
-                for (const edu of (r.education || [])) {
-                    await API.post('/api/experiences/education', edu); count++;
+                for (let i = 0; i < (r.education || []).length; i++) {
+                    if (skipSet.has('education:' + i)) continue;
+                    await API.post('/api/experiences/education', r.education[i]); count++;
                 }
                 // 兼容 work_experience 和 internships
                 const workExps = r.work_experience || r.internships || [];
-                for (const exp of workExps) {
-                    await API.post('/api/experiences/internships', exp); count++;
+                for (let i = 0; i < workExps.length; i++) {
+                    if (skipSet.has('work_experience:' + i) || skipSet.has('internships:' + i)) continue;
+                    await API.post('/api/experiences/internships', workExps[i]); count++;
                 }
-                for (const proj of (r.projects || [])) {
-                    await API.post('/api/experiences/projects', proj); count++;
+                for (let i = 0; i < (r.projects || []).length; i++) {
+                    if (skipSet.has('projects:' + i)) continue;
+                    await API.post('/api/experiences/projects', r.projects[i]); count++;
                 }
-                for (const skill of (r.skills || [])) {
-                    await API.post('/api/experiences/skills', skill); count++;
+                for (let i = 0; i < (r.skills || []).length; i++) {
+                    if (skipSet.has('skills:' + i)) continue;
+                    await API.post('/api/experiences/skills', r.skills[i]); count++;
                 }
-                for (const award of (r.awards || [])) {
-                    await API.post('/api/experiences/awards', award); count++;
+                for (let i = 0; i < (r.awards || []).length; i++) {
+                    if (skipSet.has('awards:' + i)) continue;
+                    await API.post('/api/experiences/awards', r.awards[i]); count++;
+                }
+                for (let i = 0; i < (r.others || []).length; i++) {
+                    if (skipSet.has('others:' + i)) continue;
+                    await API.post('/api/experiences/others', r.others[i]); count++;
                 }
                 if (r.self_evaluation && r.self_evaluation.content) {
                     await API.post('/api/experiences/self-evaluation', r.self_evaluation);
                 }
                 await loadExperiences();
                 pasteText.value = '';
-                alert(`AI 解析完成！已导入 ${count} 条经历到各模块\n\n请逐模块检查信息是否准确。`);
+                alert(`AI 解析完成！已导入 ${count} 条经历到各模块` + (dupSkipped ? `，跳过 ${dupSkipped} 条重复` : '') + `\n\n请逐模块检查信息是否准确。`);
             } catch(e) {
                 alert('AI解析失败: ' + e.message + '\n\n请检查: 1) .env中是否配置了API Key 2) 网络是否正常');
             }
@@ -388,10 +443,53 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
             interpreting.value = false;
         }
 
+        // [测试专用] 一键清空经历库（发布前删除）
+        async function clearAllExperience() {
+            if (!confirm('确定清空全部经历数据吗？\n\n包括：基本信息、教育、实习、项目、技能、获奖、自我评价\n\n此操作不可恢复！')) return;
+            if (!confirm('再次确认：真的要清空吗？清空后需重新录入所有经历。')) return;
+            try {
+                await API.post('/api/experiences/clear-all', {});
+                await loadExperiences();
+                alert('✅ 经历库已清空，可以开始新测试');
+            } catch(e) {
+                alert('清空失败: ' + e.message);
+            }
+        }
+
+        // 生成前内容量预检：偏少则提醒用户先补充真实经历
+        function precheckExperience() {
+            const projCount = ((modules.find(m=>m.key==='projects')||{}).items||[]).length;
+            const internCount = ((modules.find(m=>m.key==='internships')||{}).items||[]).length;
+            const skillCount = ((modules.find(m=>m.key==='skills')||{}).items||[]).length;
+            const reasons = [];
+            if (projCount === 0 && internCount === 0) reasons.push('还没有任何项目或实习经历，简历缺少核心内容');
+            if (projCount + internCount < 2) reasons.push('项目/实习经历较少（当前 ' + (projCount+internCount) + ' 条），简历很可能填不满一页');
+            if (skillCount < 3) reasons.push('技能只有 ' + skillCount + ' 项，建议补充到 6 项以上');
+            return reasons;
+        }
+
         async function generateResume() {
             if (!jdText.value.trim()) { alert('请先粘贴目标岗位的JD'); return; }
+            // 生成前内容量预检：偏少先弹窗解释，避免生成后才发现问题
+            try {
+                const reasons = precheckExperience();
+                if (reasons.length > 0) {
+                    const ok = confirm('⚠️ 检测到你的经历内容偏少：\n\n' + reasons.map(r=>'· ' + r).join('\n') + '\n\n生成的简历可能填不满一页，内容不够充实。\n建议先去「经历管理」补充更多真实经历再生成，效果会更好。\n\n仍要继续生成吗？\n（点「确定」继续生成，点「取消」先去补充经历）');
+                    if (!ok) { return; }
+                }
+            } catch(e) {}
             generating.value = true;
             result.value = null;
+            // 生成前匹配度预览（零AI成本）：低匹配度先征询用户
+            let previewMatch = null;
+            try {
+                previewMatch = await API.post('/api/match/preview', { jd_text: jdText.value });
+            } catch(e) {}
+            if (previewMatch && previewMatch.level === 'low') {
+                const hit = previewMatch.matched ? previewMatch.matched.length : 0;
+                const ok = confirm('当前经历库与目标岗位匹配度较低（' + (previewMatch.score ?? '?') + ' 分，命中 ' + hit + '/' + previewMatch.total + '）。\n\nAI 将启用「匹配增强模式」：在不编造的前提下，按岗位视角重新提炼现有经历、补强技能区与自我评价，尽量贴近岗位要求。\n\n仍要继续生成吗？');
+                if (!ok) { generating.value = false; return; }
+            }
             try {
                 result.value = await API.post('/api/resumes/generate', {
                     jd_text: jdText.value,
@@ -399,12 +497,297 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
                     industry: jdIndustry.value,
                 });
                 currentTab.value = 'generate';
+                compactLevel.value = 0;
+                fillMode.value = false;
+                fillFactor.value = 1;
+                fitNotice.value = '';
+                renderResumePreview();
+                await autoFitToPage();
             } catch(e) {
                 alert('简历生成失败: ' + e.message + '\n\n可能原因: 1) 经历库为空 2) API Key未配置 3) 网络问题');
             }
             generating.value = false;
         }
 
+        // ======== A4 一页适配：压缩档位 / 自动填充 / 页数徽标 ========
+        // 打印一页可用高度：A4高(297mm≈1123px) - 打印上下padding(0.7cm×2≈53px) ≈ 1070px，再留2%余量
+        const PRINT_PAGE_H = 1060;
+        const compactLevel = ref(0);   // 0=正常 1=轻压 2=最小字号
+        const fillMode = ref(false);   // 内容过少时自动拉伸至接近一页
+        const fillFactor = ref(1);       // 填充强度（动态计算）
+        const pageCount = ref(1);
+        const pageOverflow = ref(false);
+        const fitNotice = ref('');       // 一页自动适配状态提示
+        const fitAutoRun = ref(false);   // 防止自动适配递归
+        const trimTried = ref(false);   // 本次适配是否已 AI 精简过（防重复调用）
+        const expandTried = ref(false); // 本次适配是否已 AI 扩写过（防重复调用）
+
+        const fitNoticeClass = computed(() => {
+            if (fitNotice.value.startsWith('⚠️')) return 'fit-notice-warn';
+            if (fitNotice.value.startsWith('✂️')) return 'fit-notice-info';
+            return 'fit-notice-ok';
+        });
+
+        // 匹配度预警卡片
+        const matchCardClass = computed(() => {
+            const lv = result.value && result.value.match_info ? result.value.match_info.level : '';
+            if (lv === 'low') return 'match-card-low';
+            if (lv === 'medium') return 'match-card-medium';
+            return 'match-card-high';
+        });
+        const matchCardTitle = computed(() => {
+            const lv = result.value && result.value.match_info ? result.value.match_info.level : '';
+            if (lv === 'low') return '⚠️ 匹配度偏低 — 已启用增强模式';
+            if (lv === 'medium') return '⚡ 匹配度一般 — 已启用增强模式';
+            return '✅ 匹配度良好';
+        });
+
+        // 压缩/填充用的覆盖样式：CSS 变量 + calc，保证层级差（h1=正文+14 / h2=+4 / 条目标题=+2 / 辅助=-2）
+        function buildResumeOverrideCss(level, fill, fillFactor) {
+            const presets = [
+                { base: 14, line: 1.8, space: 1 },   // 正常
+                { base: 13.5, line: 1.7, space: 0.92 }, // 轻压
+                { base: 13, line: 1.6, space: 0.85 },   // 最小字号（硬下限）
+            ];
+            const lv = presets[Math.min(Math.max(level, 0), 2)];
+            let base = lv.base, line = lv.line, space = lv.space;
+            if (fill) {
+                // 填充模式：在当前字号档位基础上放大字号 + 行高 + 间距（层级差靠 calc 相对差值保持）
+                const f = Math.max(1, Math.min(fillFactor || 1, 3.0));
+                base = Math.min(lv.base + (f - 1) * 2, 18);
+                line = Math.min(lv.line * Math.sqrt(f), 2.5);
+                space = Math.min(lv.space * Math.sqrt(f), 1.7);
+            }
+            return [
+                '@media screen { :host { width: 794px !important; max-width: 100% !important; padding: 0 0.8cm !important; box-sizing: border-box !important; } }',
+                ':host { --r-base: ' + base + 'px; --r-line: ' + line + '; --r-space: ' + space + '; }',
+                '.resume-body { font-size: var(--r-base) !important; line-height: var(--r-line) !important; }',
+                '.resume-body h1, .resume-body .header-left h1 { font-size: calc(var(--r-base) + 14px) !important; line-height: 1.3 !important; margin-top: 0 !important; margin-bottom: calc(6px * var(--r-space)) !important; }',
+                '.resume-body h2 { font-size: calc(var(--r-base) + 4px) !important; line-height: 1.3 !important; margin-top: calc(8px * var(--r-space)) !important; margin-bottom: calc(3px * var(--r-space)) !important; padding-bottom: calc(5px * var(--r-space)) !important; }',
+                '.resume-body .item-title { font-size: calc(var(--r-base) + 2px) !important; }',
+                '.resume-body .item-sub { font-size: calc(var(--r-base) - 2px) !important; }',
+                '.resume-body .skills, .resume-body .project-bullets li { font-size: var(--r-base) !important; }',
+                '.resume-body .project-bullets { margin-top: calc(6px * var(--r-space)) !important; }',
+                '.resume-body .project-bullets li { margin-bottom: calc(6px * var(--r-space)) !important; line-height: calc(var(--r-line) * 0.9) !important; }',
+                '.resume-body .item { margin-bottom: calc(4px * var(--r-space)) !important; }',
+                '.resume-body .header { margin-top: calc(4px * var(--r-space)) !important; margin-bottom: calc(4px * var(--r-space)) !important; padding: calc(4px * var(--r-space)) !important; }',
+                '.resume-body .info, .resume-body .info * { font-size: var(--r-base) !important; }',
+                '.resume-body p { margin-top: calc(3px * var(--r-space)) !important; margin-bottom: calc(3px * var(--r-space)) !important; }',
+                // 技能区紧凑：行高压低、段落间距收紧，避免技能区散开成多行大间隔
+                '.resume-body .skills { line-height: 1.5 !important; }',
+                '.resume-body .skills p { margin-top: 1px !important; margin-bottom: 1px !important; }',
+                '.resume-body .skills hr.skill-divider { margin-top: 2px !important; margin-bottom: 2px !important; height: 1px !important; border: none; }',
+                // A4 分页参考线（仅预览显示，导出不带出）
+                '.preview-shell { position: relative; }',
+                '.resume-page-guide { position: absolute; left: 0; right: 0; height: 0; border-top: 1.5px dashed #e0a800; pointer-events: none; z-index: 50; }',
+                '.resume-page-guide::after { content: "▼ 第 " attr(data-page) " 页分页线（导出在此分页）"; position: absolute; right: 8px; top: 5px; font-size: 11px; color: #92400e; background: #fef3c7; padding: 1px 8px; border-radius: 10px; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.15); }',
+                '.resume-body .age-placeholder:empty::before { color: #aaa !important; font-size: 12px !important; }',
+            ].join('\n');
+        }
+
+        // 根据内容高度估算页数（预览宽按 A4 比例 210:297 推算一页高度）
+        function updatePageMeta() {
+            const container = document.getElementById('resumePreview');
+            if (!container || !container.shadowRoot) return;
+            const wrapper = container.shadowRoot.querySelector('.resume-body');
+            if (!wrapper) return;
+            const pages = Math.max(0.1, wrapper.scrollHeight / PRINT_PAGE_H);
+            pageCount.value = Math.max(1, Math.ceil(pages));
+            pageOverflow.value = pages > 1.0;
+            // 内容不足一页（< 0.95 页）→ 自动启用填充模式，目标接近 0.97 页（自动适配期间由 autoFitToPage 统一控制）
+            if (!fillMode.value && !fitAutoRun.value && pages < 0.95) {
+                fillMode.value = true;
+                fillFactor.value = Math.max(1, Math.min(0.97 / pages, 3.0));
+                renderResumePreview();
+            }
+        }
+
+        // 绘制 A4 分页参考线：在每页结束处画一条虚线 + 页签
+        function drawPageGuides(wrapper) {
+            const shell = wrapper && wrapper.parentElement;
+            if (!shell) return;
+            shell.querySelectorAll('.resume-page-guide').forEach(el => el.remove());
+            const lines = Math.floor(wrapper.scrollHeight / PRINT_PAGE_H);
+            for (let i = 1; i <= lines; i++) {
+                const g = document.createElement("div");
+                g.className = "resume-page-guide";
+                g.dataset.page = i;
+                g.style.top = (PRINT_PAGE_H * i) + "px";
+                shell.appendChild(g);
+            }
+        }
+
+        // 当前内容折算页数
+        function getPages() {
+            const container = document.getElementById('resumePreview');
+            if (!container || !container.shadowRoot) return 1;
+            const w = container.shadowRoot.querySelector('.resume-body');
+            return w ? Math.max(0.1, w.scrollHeight / PRINT_PAGE_H) : 1;
+        }
+
+        // 自动 AI 精简（超页兜底）：循环最多 2 轮，不劳用户手动用 AI 修改
+        async function trimToFit() {
+            for (let round = 0; round < 2; round++) {
+                try {
+                    const r = await API.post('/api/resumes/auto-trim', {
+                        resume_html: result.value.resume_html,
+                        jd_text: jdText.value,
+                    });
+                    if (r && r.revised_html) {
+                        result.value.resume_html = r.revised_html;
+                        compactLevel.value = 0;
+                        fillMode.value = false;
+                        fillFactor.value = 1;
+                        await renderResumePreview();
+                        if (!pageOverflow.value && getPages() >= 0.95) {
+                            fitNotice.value = '✂️ 内容超出较多，已自动用 AI 精简至一页';
+                            return;
+                        }
+                    }
+                } catch(e) {
+                    fitNotice.value = '⚠️ AI 精简失败，请直接在简历上删减次要内容';
+                    return;
+                }
+            }
+            fitNotice.value = '⚠️ 已压缩到最小字号并 AI 精简，仍超一页，请手动删减次要内容';
+        }
+
+        // 自动 AI 扩写（内容太少兜底）：基于真实经历展开句式，不编造事实
+        async function expandToFit() {
+            for (let round = 0; round < 2; round++) {
+                try {
+                    const r = await API.post('/api/resumes/auto-expand', {
+                        resume_html: result.value.resume_html,
+                        jd_text: jdText.value,
+                    });
+                    if (r && r.revised_html) {
+                        result.value.resume_html = r.revised_html;
+                        compactLevel.value = 0;
+                        fillMode.value = false;
+                        fillFactor.value = 1;
+                        await renderResumePreview();
+                        if (getPages() >= 0.95) return;
+                    }
+                } catch(e) {
+                    fitNotice.value = '⚠️ AI 扩写失败，内容较少，建议补充更多真实经历';
+                    return;
+                }
+            }
+        }
+
+        // 生成后自动适配一页（适配循环）：无论初始多少，收敛到 0.95~1.0 页（留白 0-2 行）
+        // 超页 → 逐级压缩 → 仍超则 AI 精简（一次）；不足 → CSS 迭代填充 → 仍不足则 AI 扩写（一次，不编造）
+        async function autoFitToPage() {
+            if (!result.value || !result.value.resume_html) return;
+            if (fitAutoRun.value) return;
+            fitAutoRun.value = true;
+            try {
+                trimTried.value = false;
+                expandTried.value = false;
+                await renderResumePreview();
+                for (let guard = 0; guard < 14; guard++) {
+                    const pages = getPages();
+                    // 达标：0.95~1.0 页（留白 0-2 行），静默交付
+                    if (pages >= 0.985 && pages <= 1.0) {
+                        fitNotice.value = '';
+                        return;
+                    }
+                    if (pages > 1.0) {
+                        // 超页：先退出填充态（fill 会忽略压缩档位，两者互斥），再压缩档位，压到底仍超则 AI 精简（最多一次）
+                        if (fillMode.value) {
+                            fillMode.value = false;
+                            fillFactor.value = 1;
+                            await renderResumePreview();
+                            continue;
+                        }
+                        if (compactLevel.value < 2) {
+                            compactLevel.value++;
+                            await renderResumePreview();
+                        } else if (!trimTried.value) {
+                            trimTried.value = true;
+                            await trimToFit();
+                        } else {
+                            break;
+                        }
+                        continue;
+                    }
+                    // 不足（<0.985）：用确定性二分求"最大不超一页"的 fillFactor
+                    // （内容高度随 ff 基本单调，二分稳定收敛；替代原先"放大→超页→二分"的震荡式）
+                    fillMode.value = true;
+                    let lo = 1, hi = 3.0, best = 1, bestPages = getPages();
+                    for (let i = 0; i < 10; i++) {
+                        const mid = (lo + hi) / 2;
+                        fillFactor.value = mid;
+                        await renderResumePreview();
+                        const p = getPages();
+                        if (p > 1.0) { hi = mid; } else { best = mid; bestPages = p; lo = mid; }
+                    }
+                    fillFactor.value = best;
+                    await renderResumePreview();
+                    if (bestPages >= 0.985 && bestPages <= 1.0) { fitNotice.value = ''; return; }
+                    // 二分后仍不足：AI 扩写兜底（最多一次，基于真实经历展开，不编造）
+                    if (bestPages < 0.985 && !expandTried.value) {
+                        expandTried.value = true;
+                        fitNotice.value = '✍️ 内容偏少，正在用 AI 基于真实经历扩写…';
+                        await expandToFit();
+                        const after = getPages();
+                        if (after >= 0.985 && after <= 1.0) { fitNotice.value = ''; return; }
+                    } else if (bestPages < 0.985) {
+                        break;
+                    }
+                }
+                // 达到循环上限或已尝试兜底仍未收敛
+                const finalPages = getPages();
+                if (finalPages > 1.0) {
+                    fitNotice.value = '⚠️ 内容仍超一页，请手动删减次要内容';
+                } else if (finalPages < 0.9) {
+                    fitNotice.value = '⚠️ 内容较少，建议在「经历管理」补充更多真实经历后重新生成';
+                } else {
+                    fitNotice.value = '';
+                }
+            } finally {
+                fitAutoRun.value = false;
+            }
+        }
+        // 简历预览：Shadow DOM 直接平铺渲染（无 iframe 框、完整显示、可编辑）
+        async function renderResumePreview() {
+            await nextTick();
+            const container = document.getElementById('resumePreview');
+            if (!container || !result.value || !result.value.resume_html) return;
+            const doc = new DOMParser().parseFromString(result.value.resume_html, "text/html");
+            const shadow = container.shadowRoot || container.attachShadow({mode: "open"});
+            shadow.innerHTML = "";
+            // 样式：body 选择器改为 :host（应用到预览容器），其余选择器在 shadow 内天然隔离
+            doc.querySelectorAll("style").forEach(s => {
+                const st = document.createElement("style");
+                st.textContent = s.textContent.replace(/\bbody\b/g, ":host");
+                shadow.appendChild(st);
+            });
+            // 注入 A4 适配覆盖样式（压缩档位 / 内容填充）
+            const ov = document.createElement("style");
+            ov.textContent = buildResumeOverrideCss(compactLevel.value, fillMode.value, fillFactor.value);
+            shadow.appendChild(ov);
+            // 内容包一层可编辑容器（保留预览中直接修改的能力），跳过 script
+            const wrapper = document.createElement("div");
+            wrapper.className = "resume-body";
+            wrapper.setAttribute("contenteditable", "true");
+            while (doc.body.firstChild) {
+                const node = doc.body.firstChild;
+                if (node.nodeName === "SCRIPT") { doc.body.removeChild(node); continue; }
+                wrapper.appendChild(node);
+            }
+            // 外面套定位容器，承载 A4 分页参考线（参考线在 wrapper 外，导出时不带出）
+            const shell = document.createElement("div");
+            shell.className = "preview-shell";
+            shell.appendChild(wrapper);
+            shadow.appendChild(shell);
+            drawPageGuides(wrapper);
+            wrapper.addEventListener('input', () => {
+                drawPageGuides(wrapper);
+                updatePageMeta();
+            });
+            updatePageMeta();
+        }
         // 简历质量诊断（客观分 + AI找茬）
         const diagnosing = ref(false);
         const diagnosis = ref(null);
@@ -581,6 +964,7 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
                     html_content: result.value.resume_html,
                 });
                 result.value.resume_html = r.clean_html;
+                renderResumePreview();
                 hasRevision.value = false;
                 previousResumeHtml.value = '';
                 reviseInstruction.value = '';
@@ -593,6 +977,7 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
         function rejectRevision() {
             if (previousResumeHtml.value) {
                 result.value.resume_html = previousResumeHtml.value;
+                renderResumePreview();
                 previousResumeHtml.value = '';
                 hasRevision.value = false;
                 reviseInstruction.value = '';
@@ -604,16 +989,39 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
             if (!result.value || !result.value.resume_html) {
                 alert('请先生成简历'); return;
             }
-            // 直接触发浏览器打印 → 另存为PDF（中文完美渲染，格式与预览一致）
-            const iframe = document.getElementById('resumeFrame');
-            if (iframe && iframe.contentWindow) {
-                iframe.contentWindow.focus();
-                iframe.contentWindow.print();
-            } else {
-                alert('请在预览框中按 Ctrl+P → 另存为PDF');
+            // 取预览中的最新内容（含用户直接编辑），无预览则用生成结果
+            let html = result.value.resume_html;
+            const container = document.getElementById('resumePreview');
+            if (container && container.shadowRoot) {
+                const wrapper = container.shadowRoot.querySelector('.resume-body');
+                if (wrapper) {
+                    const doc = new DOMParser().parseFromString(result.value.resume_html, "text/html");
+                    const headHtml = doc.querySelector('head') ? doc.querySelector('head').innerHTML : '';
+                    // 把预览中应用的压缩/填充样式一并带入打印（:host/.resume-body 换成 body，打印 iframe 无 Shadow DOM）
+                    let overrideCss = '';
+                    try {
+                        overrideCss = buildResumeOverrideCss(compactLevel.value, fillMode.value, fillFactor.value)
+                            .replace(/:host/g, 'body')
+                            .replace(/\.resume-body/g, 'body')
+                            // 去掉预览专用的分页参考线样式（打印不需要）
+                            .split('\n')
+                            .filter(l => !l.includes('preview-shell') && !l.includes('resume-page-guide'))
+                            .join('\n')
+                            // 打印边距兜底：恢复 body 上下 0.7cm / 左右 0.8cm（覆盖模板 @media print 对 body padding 的误伤）
+                            + '\nbody { margin: 0 !important; padding: 0.7cm 0.8cm !important; }';
+                    } catch(e) { overrideCss = ''; }
+                    html = '<!DOCTYPE html><html><head>' + headHtml + '\n<style>' + overrideCss + '</style></head><body contenteditable="true">' + wrapper.innerHTML + '</body></html>';
+                }
             }
+            // 直接触发浏览器打印 → 另存为PDF（中文完美渲染，格式与预览一致）
+            const pf = document.getElementById('resumePrintFrame');
+            if (!pf) { alert('请在预览框中按 Ctrl+P → 另存为PDF'); return; }
+            pf.srcdoc = '';
+            setTimeout(() => {
+                pf.srcdoc = html;
+                pf.onload = () => { pf.contentWindow.focus(); pf.contentWindow.print(); };
+            }, 60);
         }
-
         // ======== 公司洞察 ========
         const companySearchName = ref('');
         const companySearchLocation = ref('');
@@ -941,29 +1349,26 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
                     job_title: jt,
                 });
                 if (r.success) {
-                    await navigator.clipboard.writeText(
-                        new DOMParser().parseFromString(result.value.resume_html, 'text/html').body.textContent || ''
-                    ).catch(() => {});
-                    let msg = '✅ 投递成功！\n\n';
+                    let msg = '✅ 已记录到「我的投递」！' + '\n' + '\n';
                     if (r.company_name) msg += '公司：' + r.company_name + '\n';
                     if (r.job_title) msg += '岗位：' + r.job_title + '\n';
-                    msg += '时间：' + r.delivery_time + '\n\n';
-                    msg += '简历内容已复制到剪贴板。';
+                    msg += '时间：' + r.delivery_time + '\n' + '\n';
+                    msg += '投递记录和简历快照已保存，可在「我的投递」Tab 随时查看。\n';
+                    msg += '真正投递：用「🖨 打印/导出PDF」导出简历，到招聘平台上传即可。';
                     if (jdText.value) {
                         const urlMatch = jdText.value.match(/https?:\/\/[^\s一-鿿]+/);
                         if (urlMatch) {
-                            msg += '\n\n检测到JD中的链接，是否打开投递页面？';
+                            msg += '\n' + '\n检测到JD中的链接，是否打开投递页面？';
                             if (confirm(msg)) {
                                 window.open(urlMatch[0], '_blank');
                             }
                         } else {
-                            msg += '\n\n未检测到投递链接，请手动打开招聘App对应岗位页面进行投递。';
+                            msg += '\n' + '\n未检测到招聘链接，请打开招聘App对应岗位页面投递。';
                             alert(msg);
                         }
                     } else {
                         alert(msg);
-                    }
-                } else {
+                    }                } else {
                     alert('投递失败: ' + (r.error || '未知错误'));
                 }
             } catch(e) { alert('投递请求失败: ' + e.message); }
@@ -994,14 +1399,12 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
             genIntvLoading.value = false;
         }
 
-
         function copyText(text) {
             navigator.clipboard.writeText(text).then(
                 () => alert('已复制到剪贴板'),
                 () => alert('复制失败，请手动选中文字 Ctrl+C')
             );
         }
-
 
         // ======== 初始化 ========
         onMounted(async () => {
@@ -1023,7 +1426,8 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
             saveBasicInfo, saveSelfEval, formatItem,
             addingModule, startAddItem, cancelAdd, confirmAddItem,
             editingId, editFields, getFields, startEdit, cancelEdit, confirmEdit,
-            deleteItem, loadExperiences,
+            deleteItem, loadExperiences, clearAllExperience,
+            otherModules, moveItem,
             uploadPhoto, removePhoto, parseText,
             jdText, templateType, tplFileInput, templateList, generating, result,
             toggleTplDropdown, tplDropdownOpen, deleteTemplateById, deleteSelectedTemplate,
@@ -1035,6 +1439,9 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
             companyResult, companyLoading, analyzeCompany, quickAnalyzeCompany,
             rawCompanyData, dataInterpretation, interpreting, interpretData,
             generateResume, exportFile,
+            compactLevel, fillMode, fillFactor, pageCount, pageOverflow,
+            fitNotice, fitNoticeClass, autoFitToPage,
+            matchCardClass, matchCardTitle,
             reviseInstruction, revising, hasRevision, reviseError,
             sendRevise, acceptRevision, rejectRevision,
             coverLetter, genCoverLoading, genCoverLetter,

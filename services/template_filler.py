@@ -87,7 +87,8 @@ def parse_filler_response(response: str, segments: list[str]) -> list[str]:
 
 
 def _sanitize(text: str) -> str:
-    """清理文本中的非法 Unicode 代理字符"""
+    """清理文本中的非法 Unicode 代理字符与 Markdown 残留（** 粗体标记）"""
+    text = text.replace('**', '')
     try:
         return text.encode('utf-8', errors='surrogateescape').decode('utf-8', errors='replace')
     except Exception:

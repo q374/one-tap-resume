@@ -225,10 +225,10 @@ ACM-ICPC亚洲区域赛 银奖 2022
                     {{ analyzingJD ? '⏳' : '🔍' }} 分析JD
                 </button>
                 <button @click="quickAnalyzeCompany" class="btn btn-outline" :disabled="companyLoading || !jdText.trim()">
-                    {{ companyLoading ? '⏳' : '⚡' }} 快速分析
+                    {{ companyLoading ? '⏳' : '⚡' }} 公司速查
                 </button>
                 <button @click="jumpToCompanyTab" class="btn btn-outline" :disabled="!jdText.trim()" title="跳转到公司洞察Tab，生成6模块深度报告">
-                    🏢 深度洞察
+                    🏢 公司洞察
                 </button>
                 <button @click="generateResume" class="btn btn-primary" :disabled="generating">
                     {{ generating ? '⏳ 生成中' : '🚀 生成简历' }}
@@ -376,6 +376,10 @@ ACM-ICPC亚洲区域赛 银奖 2022
                         </li>
                     </ul>
                     <div v-if="!diagnosis.ai_findings.suggestions || !diagnosis.ai_findings.suggestions.length" class="hint" style="margin-top:6px">AI 未找到明显硬伤</div>
+                </div>
+                <div style="margin-top:10px">
+                    <button @click="applyDiagnosisToRevise" class="btn btn-primary" :disabled="revising || !diagnosis.ai_findings || !diagnosis.ai_findings.suggestions || !diagnosis.ai_findings.suggestions.length">📝 一键按诊断修改</button>
+                    <span class="hint" style="margin-left:8px">将诊断建议填入下方「AI辅助修改」并自动开始</span>
                 </div>
                 <p class="hint" style="margin-top:10px;color:#888">⚠️ {{ diagnosis.disclaimer }}</p>
             </div>

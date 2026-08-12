@@ -547,9 +547,12 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
             const presets = [
                 { base: 14, line: 1.8, space: 1 },   // 正常
                 { base: 13.5, line: 1.7, space: 0.92 }, // 轻压
-                { base: 13, line: 1.6, space: 0.85 },   // 最小字号（硬下限）
+                { base: 13, line: 1.6, space: 0.85 },   // 中压
+                { base: 12.5, line: 1.5, space: 0.78 }, // 重压
+                { base: 12, line: 1.4, space: 0.72 },   // 极限
+                { base: 11.5, line: 1.35, space: 0.68 },// 最小（硬下限，可读底线）
             ];
-            const lv = presets[Math.min(Math.max(level, 0), 2)];
+            const lv = presets[Math.min(Math.max(level, 0), 5)];
             let base = lv.base, line = lv.line, space = lv.space;
             if (fill) {
                 // 填充模式：在当前字号档位基础上放大字号 + 行高 + 间距（层级差靠 calc 相对差值保持）
@@ -582,6 +585,9 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
                 '.resume-page-guide { position: absolute; left: 0; right: 0; height: 0; border-top: 1.5px dashed #e0a800; pointer-events: none; z-index: 50; }',
                 '.resume-page-guide::after { content: "▼ 第 " attr(data-page) " 页分页线（导出在此分页）"; position: absolute; right: 8px; top: 5px; font-size: 11px; color: #92400e; background: #fef3c7; padding: 1px 8px; border-radius: 10px; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.15); }',
                 '.resume-body .age-placeholder:empty::before { color: #aaa !important; font-size: 12px !important; }',
+                // AI修改 diff：<del>旧内容(红删) <ins>新内容(绿增)，预览与打印均生效
+                '.resume-body del { background: #fecaca !important; color: #991b1b !important; text-decoration: none !important; padding: 0 2px !important; border-radius: 2px !important; }',
+                '.resume-body ins { background: #bbf7d0 !important; color: #166534 !important; text-decoration: none !important; padding: 0 2px !important; border-radius: 2px !important; font-weight: bold !important; }',
             ].join('\n');
         }
 
@@ -623,6 +629,26 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
             if (!container || !container.shadowRoot) return 1;
             const w = container.shadowRoot.querySelector('.resume-body');
             return w ? Math.max(0.1, w.scrollHeight / PRINT_PAGE_H) : 1;
+        }
+
+        // 修改后一页适配：仅 CSS 压缩（保留 AI 修改的红绿 diff 标记，不调用 AI 精简）
+        async function compressToFit() {
+            if (!result.value || !result.value.resume_html) return;
+            await renderResumePreview();
+            for (let i = 0; i < 6; i++) {
+                const pages = getPages();
+                if (pages <= 1.0) break;
+                if (compactLevel.value < 5) {
+                    compactLevel.value++;
+                    await renderResumePreview();
+                } else break;
+            }
+            const finalPages = getPages();
+            if (finalPages > 1.0) {
+                fitNotice.value = '⚠️ 修改后内容偏多，已自动缩小字体至 11.5px，仍略超一页；接受修改后将自动精简至一页';
+            } else {
+                fitNotice.value = '';
+            }
         }
 
         // 自动 AI 精简（超页兜底）：循环最多 2 轮，不劳用户手动用 AI 修改
@@ -700,12 +726,19 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
                             await renderResumePreview();
                             continue;
                         }
-                        if (compactLevel.value < 2) {
+                        if (compactLevel.value < 5) {
                             compactLevel.value++;
                             await renderResumePreview();
                         } else if (!trimTried.value) {
-                            trimTried.value = true;
-                            await trimToFit();
+                            // 已缩到最小字号(11.5px)仍超页：征询用户后 AI 精简（删次要内容）
+                            if (confirm('内容已压缩到最小字号（11.5px）仍超出一页。是否允许 AI 精简次要内容（如自我评价、次要项目）以适配一页？')) {
+                                trimTried.value = true;
+                                fitNotice.value = '✂️ 内容超出较多，正在用 AI 精简…';
+                                await trimToFit();
+                            } else {
+                                fitNotice.value = '⚠️ 内容仍超一页，请手动删减次要内容';
+                                break;
+                            }
                         } else {
                             break;
                         }
@@ -932,6 +965,24 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
         const reviseError = ref('');
         const previousResumeHtml = ref('');
 
+        // 一键按诊断结果修改：把 AI 找茬的 issue+fix 转成修改指令，填入修改框并自动触发
+        function applyDiagnosisToRevise() {
+            if (!diagnosis.value || !diagnosis.value.ai_findings || !diagnosis.value.ai_findings.suggestions || !diagnosis.value.ai_findings.suggestions.length) {
+                alert('暂无诊断建议，请先点击「AI质量诊断」');
+                return;
+            }
+            const tips = diagnosis.value.ai_findings.suggestions
+                .map((s, i) => (i + 1) + '. ' + [s.area, s.issue, s.fix].filter(Boolean).join('：') + (s.fix ? '（改法：' + s.fix + '）' : ''))
+                .join('\n');
+            reviseInstruction.value = '请根据以下质量诊断逐条修改简历（保留原意，只改该改的，不要编造事实）。重要约束：总篇幅必须控制在一页 A4 内，若会超页，优先精简自我评价/次要项目，不要无脑扩写。\n' + tips;
+            hasRevision.value = false;
+            reviseError.value = '';
+            // 滚动到修改面板并自动触发修改
+            const panel = document.querySelector('.revise-panel') || document.getElementById('revisePanel');
+            if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            sendRevise();
+        }
+
         async function sendRevise() {
             if (!reviseInstruction.value.trim()) return;
             if (!result.value || !result.value.resume_html) {
@@ -949,6 +1000,10 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
                 });
                 previousResumeHtml.value = currentHtml;
                 result.value.resume_html = r.revised_html;
+                // 刷新预览：展示 <del>/<ins> 红绿 diff
+                await renderResumePreview();
+                // 修改后自动压缩（仅 CSS，保留 diff；超页才降档）
+                await compressToFit();
                 hasRevision.value = true;
                 reviseInstruction.value = '';
             } catch(e) {
@@ -964,11 +1019,16 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
                     html_content: result.value.resume_html,
                 });
                 result.value.resume_html = r.clean_html;
-                renderResumePreview();
+                await renderResumePreview();
                 hasRevision.value = false;
                 previousResumeHtml.value = '';
                 reviseInstruction.value = '';
                 reviseError.value = '';
+                // 接受修改后重置回正常字号，重新完整适配一页（能大则大，含 AI 精简兜底）
+                compactLevel.value = 0;
+                fillMode.value = false;
+                fillFactor.value = 1;
+                await autoFitToPage();
             } catch(e) {
                 reviseError.value = '接受修改失败: ' + e.message;
             }
@@ -1435,7 +1495,7 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
             jdAnalysis, analyzingJD, analyzeJD,
             jdIndustry, industryOptions, industryAnalysis, analyzingIndustry,
             industryConfidenceClass, industryConfidenceLabel,
-            diagnosing, diagnosis, diagnoseResume,
+            diagnosing, diagnosis, diagnoseResume, applyDiagnosisToRevise,
             companyResult, companyLoading, analyzeCompany, quickAnalyzeCompany,
             rawCompanyData, dataInterpretation, interpreting, interpretData,
             generateResume, exportFile,

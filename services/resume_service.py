@@ -76,12 +76,21 @@ class ResumeService:
         else:
             photo_directive = '照片未提供，请将照片区域保持为<span class="editable-placeholder" contenteditable="true">请上传照片</span>。'
 
-        # 无实习/工作经历时移除模板实习模块（防止 AI 编造实习经历，数据来源唯一红线）
-        has_intern = bool(re.search(r'(实习经历|工作经历)[：:]', experience_text))
-        if not has_intern:
-            template_html = re.sub(
-                r'<!-- INTERN_MODULE_START -->[\s\S]*?<!-- INTERN_MODULE_END -->',
-                '', template_html)
+        # 根据经历库数据动态裁剪模板模块：有数据的模块保留，无数据的模块移除
+        # （防止 AI 编造不存在的经历，数据来源唯一红线）
+        _MODULE_RULES = [
+            ("WORK_MODULE", r"工作经历|实习经历"),
+            ("PROJECT_MODULE", r"项目经历"),
+            ("EDU_MODULE", r"教育背景"),
+            ("SKILL_MODULE", r"技能"),
+            ("CUSTOM_MODULE", r"获奖情况|其他信息"),
+            ("SELF_MODULE", r"自我评价"),
+        ]
+        for _marker, _title_pat in _MODULE_RULES:
+            if not re.search(rf'^(?:{_title_pat})[：:]', experience_text, re.M):
+                template_html = re.sub(
+                    rf'<!-- {_marker}_START -->[\s\S]*?<!-- {_marker}_END -->',
+                    '', template_html)
 
         # 检测是否为自定义模板（无 {{}} 占位符，如 Word/PDF 导入的）
         has_placeholders = '{{' in template_html
@@ -125,6 +134,19 @@ class ResumeService:
             issues.append(f"HTML验证: {msg}")
         if not content_ok:
             issues.append(f"内容真实性: {content_msg}")
+
+        # 结构校验：AI 不得新增模板中被裁剪的模块（防编造核心经历）
+        core_modules = {
+            "项目经历": "PROJECT_MODULE",
+            "工作经历": "WORK_MODULE",
+            "教育背景": "EDU_MODULE",
+            "专业技能": "SKILL_MODULE",
+            "自我评价": "SELF_MODULE",
+        }
+        for title, marker in core_modules.items():
+            if f"<!-- {marker}_START -->" not in template_html:
+                if re.search(rf'<h2[^>]*>\s*{title}\s*</h2>', html_content):
+                    issues.append(f"结构校验: AI 新增了模板中不存在的「{title}」模块，可能含编造内容，请人工核对")
 
         return {
             "html": html_content,

@@ -93,35 +93,42 @@
         </div>
     </div>
 
-    <!-- INTERN_MODULE_START -->
-    <h2>实习经历</h2>
-    <div class="item">
-        <div class="item-title">{{实习名称1}}</div>
-        <div class="item-sub">{{实习时间1}}</div>
-        <ul class="project-bullets">
-            <li><strong>{{实习要点1_1}}</strong></li>
-            <li><strong>{{实习要点1_2}}</strong></li>
-            <li><strong>{{实习要点1_3}}</strong></li>
-        </ul>
-    </div>
-    <div class="item">
-        <div class="item-title">{{实习名称2}}</div>
-        <div class="item-sub">{{实习时间2}}</div>
-        <ul class="project-bullets">
-            <li><strong>{{实习要点2_1}}</strong></li>
-            <li><strong>{{实习要点2_2}}</strong></li>
-            <li><strong>{{实习要点2_3}}</strong></li>
-        </ul>
-    </div>
-
-    <!-- INTERN_MODULE_END -->
-
+    <!-- 模板二：教育背景优先（适合学历专业对口的情况） -->
+    <!-- EDU_MODULE_START -->
     <h2>教育背景</h2>
     <div class="item">
         <div class="item-title"><span>{{学校名称}}</span><span>{{入学时间}} - {{毕业时间}}</span></div>
-        <div class="item-sub">{{专业}} | 本科</div>
+        <div class="item-sub">{{专业}} | {{学位}}</div>
     </div>
+    <div class="item">
+        <div class="item-title"><span>{{学校名称2}}</span><span>{{入学时间2}} - {{毕业时间2}}</span></div>
+        <div class="item-sub">{{专业2}} | {{学位2}}</div>
+    </div>
+    <!-- EDU_MODULE_END -->
 
+    <!-- WORK_MODULE_START -->
+    <h2>工作经历</h2>
+    <div class="item">
+        <div class="item-title">{{工作名称1}}</div>
+        <div class="item-sub">{{工作时间1}}</div>
+        <ul class="project-bullets">
+            <li><strong>{{工作要点1_1}}</strong></li>
+            <li><strong>{{工作要点1_2}}</strong></li>
+            <li><strong>{{工作要点1_3}}</strong></li>
+        </ul>
+    </div>
+    <div class="item">
+        <div class="item-title">{{工作名称2}}</div>
+        <div class="item-sub">{{工作时间2}}</div>
+        <ul class="project-bullets">
+            <li><strong>{{工作要点2_1}}</strong></li>
+            <li><strong>{{工作要点2_2}}</strong></li>
+            <li><strong>{{工作要点2_3}}</strong></li>
+        </ul>
+    </div>
+    <!-- WORK_MODULE_END -->
+
+    <!-- PROJECT_MODULE_START -->
     <h2>项目经历</h2>
     <div class="item">
         <div class="item-title">{{项目名称1}}</div>
@@ -141,14 +148,21 @@
             <li><strong>{{要点2_4}}</strong></li>
         </ul>
     </div>
+    <!-- PROJECT_MODULE_END -->
 
+    <!-- SKILL_MODULE_START -->
     <h2>专业技能</h2>
     <div class="skills">{{技能列表}}</div>
+    <!-- SKILL_MODULE_END -->
 
+    <!-- CUSTOM_MODULE_START -->
     {{自定义模块}}
+    <!-- CUSTOM_MODULE_END -->
 
+    <!-- SELF_MODULE_START -->
     <h2>自我评价</h2>
     <p>{{自我评价内容}}</p>
+    <!-- SELF_MODULE_END -->
 <script>
         document.addEventListener('DOMContentLoaded', function() {
             var placeholders = document.querySelectorAll('.editable-placeholder');

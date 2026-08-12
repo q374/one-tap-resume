@@ -76,6 +76,13 @@ class ResumeService:
         else:
             photo_directive = '照片未提供，请将照片区域保持为<span class="editable-placeholder" contenteditable="true">请上传照片</span>。'
 
+        # 无实习/工作经历时移除模板实习模块（防止 AI 编造实习经历，数据来源唯一红线）
+        has_intern = bool(re.search(r'(实习经历|工作经历)[：:]', experience_text))
+        if not has_intern:
+            template_html = re.sub(
+                r'<!-- INTERN_MODULE_START -->[\s\S]*?<!-- INTERN_MODULE_END -->',
+                '', template_html)
+
         # 检测是否为自定义模板（无 {{}} 占位符，如 Word/PDF 导入的）
         has_placeholders = '{{' in template_html
 

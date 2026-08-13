@@ -446,14 +446,14 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
             interpreting.value = false;
         }
 
-        // [测试专用] 一键清空经历库（发布前删除）
+        // 一键清空经历库
         async function clearAllExperience() {
             if (!confirm('确定清空全部经历数据吗？\n\n包括：基本信息、教育、实习、项目、技能、获奖、自我评价\n\n此操作不可恢复！')) return;
             if (!confirm('再次确认：真的要清空吗？清空后需重新录入所有经历。')) return;
             try {
                 await API.post('/api/experiences/clear-all', {});
                 await loadExperiences();
-                alert('✅ 经历库已清空，可以开始新测试');
+                alert('✅ 经历库已清空');
             } catch(e) {
                 alert('清空失败: ' + e.message);
             }

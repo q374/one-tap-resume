@@ -5,32 +5,12 @@
 - 返回 match_score / missing_keywords / level，供前端展示预警与补录引导
 
 原则：匹配度只做「相关性提示」，永不虚构经历——事实始终来自经历库。
+关键词提取与别名展开统一走 prompts/skill_aliases.py：
+- JD 关键词 = 行业知识库（去噪音）+ 英文技术词（去停用词）
+- 每个关键词展开成等价词簇（如"大模型"→{大模型, chatgpt, coze, dify,...}），
+  命中任一同义词即算命中，解决"JD 中文术语 vs 经历库英文工具名"不命中问题
 """
-import re
-
-from prompts.industry_profiles import INDUSTRY_PROFILES
-
-_STOP_WORDS = {
-    "and", "the", "for", "with", "you", "your", "will", "have", "has",
-    "are", "not", "that", "this", "our", "all", "can", "who", "what",
-    "how", "why", "but", "from", "into", "about", "over", "also", "was",
-    "等等", "以及", "要求", "任职", "岗位", "职位", "工作", "负责", "熟悉",
-    "优先", "经验", "能力", "相关", "以上", "我们", "进行", "能够", "具备",
-}
-
-
-def _extract_jd_keywords(jd_text: str) -> list:
-    """从 JD 提取关键词：行业知识库关键词（命中JD者）+ 英文技术词（去停用词）"""
-    jd_lower = jd_text.lower()
-    keywords = set()
-    for profile in INDUSTRY_PROFILES.values():
-        for kw in profile.get("keywords", []):
-            if kw and kw.lower() in jd_lower:
-                keywords.add(kw.lower())
-    for word in re.findall(r"[a-zA-Z][a-zA-Z0-9+#.]{2,}", jd_text):
-        if word.lower() not in _STOP_WORDS:
-            keywords.add(word.lower())
-    return sorted(keywords)
+from prompts.skill_aliases import extract_jd_keywords, expand_keyword, alias_hit
 
 
 def compute_match(experience_text: str, jd_text: str) -> dict:
@@ -42,14 +22,19 @@ def compute_match(experience_text: str, jd_text: str) -> dict:
         return {"score": None, "level": "unknown", "matched": [],
                 "missing_keywords": [], "total": 0, "detail": "未提供JD"}
 
-    jd_kw = _extract_jd_keywords(jd_text)
+    jd_kw = extract_jd_keywords(jd_text)
     if not jd_kw:
         return {"score": None, "level": "unknown", "matched": [],
                 "missing_keywords": [], "total": 0, "detail": "JD未识别到关键词"}
 
     exp_lower = experience_text.lower()
-    matched = [k for k in jd_kw if k in exp_lower]
-    missing = [k for k in jd_kw if k not in exp_lower]
+    matched = []
+    missing = []
+    for k in jd_kw:
+        if any(alias_hit(exp_lower, a) for a in expand_keyword(k)):
+            matched.append(k)
+        else:
+            missing.append(k)
 
     ratio = len(matched) / len(jd_kw)
     score = round(ratio * 100)

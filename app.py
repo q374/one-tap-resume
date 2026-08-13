@@ -241,7 +241,7 @@ class ImportCheckRequest(BaseModel):
 
 @app.post("/api/experiences/clear-all")
 async def clear_all_experiences():
-    """[测试专用] 一键清空所有经历数据（发布上线前删除此接口）"""
+    """一键清空所有经历数据（不可恢复，操作前请确认）"""
     tables = ["basic_info", "education", "internships", "projects",
               "skills", "awards", "other_info", "self_evaluation"]
     with db.connection() as conn:

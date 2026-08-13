@@ -1,5 +1,6 @@
 import re
 
+from prompts.skill_aliases import annotate_skill_name
 from core.database import db
 from core.models import BasicInfo, Education, Internship, Project, Skill, Award, SelfEvaluation, OtherInfo
 
@@ -248,7 +249,7 @@ class ExperienceService:
             sections.append("\n技能：")
             for skill in skill_list:
                 evidence = f"（{skill.evidence}）" if skill.evidence else ""
-                sections.append(f"{skill.name}{evidence}")
+                sections.append(f"{annotate_skill_name(skill.name)}{evidence}")
 
         award_list = self.list_awards()
         if award_list:

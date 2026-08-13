@@ -35,6 +35,10 @@ INDUSTRY_PROFILES = {
             "nlp", "cv", "多模态", "推荐系统", "搜索", "人工智能",
             "pytorch", "tensorflow", "训练", "推理", "模型优化", "aigc",
             "智能体", "数据挖掘", "特征工程", "模型部署", "算法工程师",
+            "chatgpt", "claude", "coze", "dify", "midjourney", "runway",
+            "stable diffusion", "提示词", "提示词工程", "prompt", "数字人",
+            "ai绘画", "视频生成", "sora", "kimi", "文心一言", "通义千问",
+            "豆包", "deepseek", "gpt", "glm", "agent", "对话式ai",
         ],
         "focus_points": [
             "算法/模型类项目放在最前，说清问题、方法、数据规模、最终指标（准确率/召回/AUC等）",

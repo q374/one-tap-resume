@@ -4,12 +4,16 @@
 - 客观分全部由代码计算（JD覆盖率/量化数字/页数估算/套话/硬性要求），AI 无法自评美化
 - AI 只做"找茬"：以挑剔 HR 视角输出具体可改的问题，不给总分
 - 永远附带边界说明：诊断只查硬伤，不承诺通过任何筛选
+
+JD 关键词提取与别名展开统一走 prompts/skill_aliases.py：
+- 与匹配度口径一致（同词表、同噪音过滤、同等价词簇展开）
+- 解决"JD 写大模型/提示词、简历写 ChatGPT/Prompt"字面不命中问题
 """
 import re
 
 from core.deepseek_client import call_deepseek_json
 from prompts.resume_diagnosis import build_diagnosis_prompt
-from prompts.industry_profiles import INDUSTRY_PROFILES
+from prompts.skill_aliases import extract_jd_keywords, expand_keyword, alias_hit
 
 
 # 客观分各维度权重（共 100 分）
@@ -34,7 +38,7 @@ _BUZZWORDS = [
 
 # 量化成果正则：数字 + 单位/百分号/倍率等
 _QUANT_PATTERN = re.compile(
-    r"[0-9]+(?:\.[0-9]+)?\s*(?:%|％|倍|人|万|亿|千|ms|s|个|家|款|次|分|天|月|年|项|篇|页|行|份|台|套|单|门|名|QPS|TPS|K|k|MB|GB|TB|\+)"
+    r"[0-9]+(?:.[0-9]+)?\s*(?:%|％|倍|人|万|亿|千|ms|s|个|家|款|次|分|天|月|年|项|篇|页|行|份|台|套|单|门|名|QPS|TPS|K|k|MB|GB|TB|\+)"
 )
 
 _EDU_REQUIREMENT = ["本科", "硕士", "博士", "大专", "本科及以上", "统招"]
@@ -48,31 +52,19 @@ def _strip_html(html: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _extract_jd_keywords(jd_text: str) -> list:
-    """从 JD 提取关键技能词：行业知识库关键词 + 英文技术词"""
-    jd_lower = jd_text.lower()
-    keywords = set()
-    for profile in INDUSTRY_PROFILES.values():
-        for kw in profile.get("keywords", []):
-            if kw.lower() in jd_lower:
-                keywords.add(kw.lower())
-    # 英文技术词
-    for word in re.findall(r"[a-zA-Z][a-zA-Z0-9+#.]{2,}", jd_text):
-        if word.lower() not in {"and", "the", "for", "with", "you", "your", "will", "have", "has", "are", "not"}:
-            keywords.add(word.lower())
-    return sorted(keywords)
-
-
 def _compute_objective(resume_html: str, jd_text: str) -> dict:
     """计算客观分（5 项硬指标），AI 无法干预"""
     html_text = _strip_html(resume_html)
     text_lower = html_text.lower()
     checks = {}
 
-    # 1. JD 关键词覆盖率
-    jd_kw = _extract_jd_keywords(jd_text)
+    # 1. JD 关键词覆盖率（含等价词簇展开，中英文写法皆可命中）
+    jd_kw = extract_jd_keywords(jd_text)
     if jd_kw:
-        covered = [k for k in jd_kw if k in text_lower]
+        covered = [
+            k for k in jd_kw
+            if any(alias_hit(text_lower, a) for a in expand_keyword(k))
+        ]
         ratio = len(covered) / len(jd_kw)
         checks["jd_coverage"] = {
             "pass": ratio >= 0.6,

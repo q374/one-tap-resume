@@ -64,6 +64,16 @@ def _annotate_irrelevant_certs(experience_text: str, jd_text: str) -> str:
     return "\n".join(out)
 
 
+def _build_github_link_html(experience_text: str) -> str:
+    """从经历文本提取 GitHub 开源链接，返回页眉展示用的 <a> 标签；无链接返回空串"""
+    m = re.search(r'https?://github\.com/[^\s，。；、）)\]"\'\u3001]+', experience_text or "")
+    if not m:
+        return ""
+    url = m.group(0).rstrip("/")
+    display = url.replace("https://", "").replace("http://", "")
+    return (f'<a href="{url}" target="_blank" '
+            f'style="color:#0366d6;text-decoration:none;">GitHub：{display}</a>')
+
 
 class ResumeService:
     async def generate(self, template_html: str, experience_text: str,
@@ -145,6 +155,13 @@ class ResumeService:
                 template_html = re.sub(
                     rf'<!-- {_marker}_START -->[\s\S]*?<!-- {_marker}_END -->',
                     '', template_html)
+
+        # GitHub 开源链接注入页眉（仅内置模板有此标记）：有链接才显示，无链接删除该行
+        github_link_html = _build_github_link_html(experience_text)
+        template_html = template_html.replace(
+            "<!-- GITHUB_LINK --><br>",
+            (github_link_html + "<br>") if github_link_html else "",
+        )
 
         # 检测是否为自定义模板（无 {{}} 占位符，如 Word/PDF 导入的）
         has_placeholders = '{{' in template_html

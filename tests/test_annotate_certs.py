@@ -46,3 +46,31 @@ def test_空jd安全():
     exp = "其他信息：\n海员证：x\n"
     out = _annotate_irrelevant_certs(exp, "")
     assert "禁止写入简历" in out
+
+def test_build_github_link_正常提取():
+    from services.resume_service import _build_github_link_html
+    exp = "其他信息：\nGitHub 开源：https://github.com/q374/one-tap-resume\n"
+    out = _build_github_link_html(exp)
+    assert "github.com/q374/one-tap-resume" in out
+    assert "GitHub：" in out
+    assert out.startswith("<a href=")
+
+
+def test_build_github_link_无链接返回空():
+    from services.resume_service import _build_github_link_html
+    assert _build_github_link_html("项目经历：\n做过的项目\n") == ""
+    assert _build_github_link_html("") == ""
+
+
+def test_build_github_link_中文标点截断():
+    from services.resume_service import _build_github_link_html
+    exp = "开源：https://github.com/q374/one-tap-resume，欢迎star"
+    out = _build_github_link_html(exp)
+    assert "q374/one-tap-resume" in out
+    assert "欢迎star" not in out
+
+
+def test_build_github_link_http也识别():
+    from services.resume_service import _build_github_link_html
+    out = _build_github_link_html("http://github.com/foo/bar 其他")
+    assert "foo/bar" in out

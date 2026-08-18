@@ -76,10 +76,6 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
         const photoInput = ref(null);
         const photoPreviewUrl = ref('');
 
-        function getModule(key) {
-            return modules.find(m => m.key === key) || {items:[]};
-        }
-
         function getPhotoUrl(photoPath) {
             if (!photoPath) return '';
             const filename = photoPath.replace(/\\/g, '/').split('/').pop();

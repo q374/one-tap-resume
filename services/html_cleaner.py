@@ -1,7 +1,4 @@
 import re
-import os
-import base64
-from config import BASE_DIR
 
 
 def clean_html_response(html_content):
@@ -80,44 +77,6 @@ def clean_html_response(html_content):
 
     return html_content
 
-
-def process_photo(html_content, experience_content):
-    """处理照片占位符，将本地图片转为base64嵌入HTML"""
-    photo_pattern = r'照片[:：]\s*(.+?)\s*$'
-    match = re.search(photo_pattern, experience_content, re.MULTILINE)
-
-    default_placeholder = '<span class="editable-placeholder" contenteditable="true">请上传照片</span>'
-
-    if match:
-        photo_path = match.group(1).strip()
-
-        if not os.path.isabs(photo_path):
-            photo_path = os.path.join(BASE_DIR, photo_path)
-
-        if photo_path and os.path.exists(photo_path):
-            try:
-                with open(photo_path, 'rb') as img_file:
-                    img_data = img_file.read()
-                    img_base64 = base64.b64encode(img_data).decode('utf-8')
-                    img_ext = os.path.splitext(photo_path)[1].lower()
-                    if img_ext == '.jpg' or img_ext == '.jpeg':
-                        img_type = 'image/jpeg'
-                    elif img_ext == '.png':
-                        img_type = 'image/png'
-                    elif img_ext == '.gif':
-                        img_type = 'image/gif'
-                    else:
-                        img_type = 'image/jpeg'
-                    img_tag = f'<img src="data:{img_type};base64,{img_base64}" alt="证件照" style="width:100%; height:100%; object-fit:cover;">'
-                    return html_content.replace('{{照片}}', img_tag)
-            except Exception as e:
-                print(f"警告：读取照片失败 {photo_path}: {e}")
-                return html_content.replace('{{照片}}', default_placeholder)
-        else:
-            print(f"警告：照片文件不存在 {photo_path}")
-            return html_content.replace('{{照片}}', default_placeholder)
-
-    return html_content.replace('{{照片}}', default_placeholder)
 
 
 def validate_html(html_content):

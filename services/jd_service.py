@@ -31,8 +31,5 @@ class JDService:
                 "raw_jd": jd_text, "cleaned_jd": cleaned
             }
 
-    def extract_company_name(self, jd_clean_result: dict) -> str:
-        return jd_clean_result.get("company_name", "")
-
 
 jd_service = JDService()

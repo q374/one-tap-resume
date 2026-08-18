@@ -10,7 +10,75 @@
 - 每个关键词展开成等价词簇（如"大模型"→{大模型, chatgpt, coze, dify,...}），
   命中任一同义词即算命中，解决"JD 中文术语 vs 经历库英文工具名"不命中问题
 """
+import re
 from prompts.skill_aliases import extract_jd_keywords, expand_keyword, alias_hit
+
+
+# 行业/赛道属性词：无法通过"补录经历"命中，不计入可补命中率（避免用户对着无法补的词干瞪眼）
+_INDUSTRY_ATTR_KEYWORDS = {
+    "saas", "b2b", "b2c", "o2o", "互联网", "云计算", "大数据", "人工智能",
+    "ai", "医疗", "医药", "生物", "金融", "银行", "证券", "保险", "基金",
+    "快消", "消费品", "零售", "电商", "制造", "工业", "汽车", "新能源",
+    "教育", "咨询", "传媒", "能源", "建筑", "地产", "游戏", "内容",
+    "企业服务", "半导体", "芯片", "数字化", "智能",
+}
+
+
+def _is_unfillable(kw: str) -> bool:
+    """判断缺失关键词是否"不可补"：行业/公司属性词、英文专名（公司/产品名）"""
+    k = kw.lower()
+    if len(expand_keyword(kw)) > 1 or k in _SKILL_KEYWORDS or k in _EXPERIENCE_KEYWORDS:
+        return False
+    if k.isascii() and re.fullmatch(r"[a-z0-9+#.]{2,}", k):
+        return True  # 英文但非技能/经历词 → 多为公司/产品专名或无关词，不可补
+    return k in _INDUSTRY_ATTR_KEYWORDS
+
+# 技能类补充词：不在 SKILL_ALIAS_CLUSTERS 里的硬技能/工具（供"怎么补"建议分类用）
+_SKILL_KEYWORDS = {
+    "sql", "python", "excel", "tableau", "finebi", "metabase", "powerbi", "bi",
+    "figma", "axure", "墨刀", "pandas", "numpy", "matplotlib", "mysql", "redis",
+    "docker", "fastapi", "git", "github", "linux", "html", "css", "javascript",
+    "react", "vue", "node", "flask", "django", "codex", "claude", "gemini",
+    "deepseek", "vibe coding", "comfyui",
+}
+
+# 经历/工作类关键词：JD 常要求"做过"的动作或产出，建议落到经历里
+_EXPERIENCE_KEYWORDS = {
+    "prd", "需求文档", "需求分析", "需求调研", "用户调研", "用户访谈", "竞品分析",
+    "原型", "原型设计", "项目管理", "跨部门", "团队协作", "推动落地", "上线验收",
+    "数据监控", "数据看板", "指标体系", "埋点", "ab测试", "a/b测试", "实验设计",
+    "产品迭代", "用户反馈", "bad case", "质量评估", "评测报告", "数据标注",
+    "运营", "推广", "投放", "内容创作", "短视频", "自媒体", "会议纪要",
+}
+
+
+def _suggest_for_keyword(kw: str) -> dict:
+    """给单个缺失关键词生成"怎么补"建议：技能类补技能区、经历类补经历、其余通用"""
+    k = kw.lower()
+    if _is_unfillable(kw):
+        if k in _INDUSTRY_ATTR_KEYWORDS:
+            return {
+                "keyword": kw, "type": "行业属性",
+                "suggestion": "属于行业/赛道属性词，可在技能或自我评价中顺带提及（可选，非必须）",
+            }
+        return {
+            "keyword": kw, "type": "专名",
+            "suggestion": "这是公司/产品专名或无关英文词，无需写入简历，可忽略",
+        }
+    if len(expand_keyword(kw)) > 1 or k in _SKILL_KEYWORDS:
+        return {
+            "keyword": kw, "type": "技能",
+            "suggestion": f"到「经历管理 → 专业技能」补充「{kw}」（仅当你确实会用时）",
+        }
+    if k in _EXPERIENCE_KEYWORDS:
+        return {
+            "keyword": kw, "type": "经历",
+            "suggestion": f"在项目/实习经历中写一条「{kw}」相关动作（真实做过才写）",
+        }
+    return {
+        "keyword": kw, "type": "其他",
+        "suggestion": f"可在技能区或自我评价中表达「{kw}」相关能力",
+    }
 
 
 def compute_match(experience_text: str, jd_text: str) -> dict:
@@ -36,6 +104,11 @@ def compute_match(experience_text: str, jd_text: str) -> dict:
         else:
             missing.append(k)
 
+    missing_limited = missing[:12]
+    unfillable = [k for k in missing_limited if _is_unfillable(k)]
+    fillable_missing = [k for k in missing_limited if not _is_unfillable(k)]
+    fillable_total = max(len(jd_kw) - len(unfillable), 1)
+    fillable_score = round(len(matched) / fillable_total * 100)
     ratio = len(matched) / len(jd_kw)
     score = round(ratio * 100)
     if ratio >= 0.6:
@@ -49,9 +122,14 @@ def compute_match(experience_text: str, jd_text: str) -> dict:
         "score": score,
         "level": level,
         "matched": matched,
-        "missing_keywords": missing[:12],
+        "missing_keywords": missing_limited,
+        "suggestions": [_suggest_for_keyword(k) for k in missing_limited],
         "total": len(jd_kw),
         "detail": f"JD关键词命中 {len(matched)}/{len(jd_kw)}",
+        "fillable_score": fillable_score,
+        "fillable_missing": fillable_missing,
+        "unfillable": unfillable,
+        "unfillable_n": len(unfillable),
     }
 
 

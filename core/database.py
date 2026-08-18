@@ -88,6 +88,7 @@ class Database:
                 actions TEXT DEFAULT '',
                 results TEXT DEFAULT '',
                 tech_stack TEXT DEFAULT '',
+                tags TEXT DEFAULT '',
                 sort_order INTEGER DEFAULT 0
             );
 
@@ -162,6 +163,14 @@ class Database:
                 ended_at TEXT DEFAULT ''
             );
         """)
+
+        # 迁移：兼容旧库缺少 projects.tags 列（2026-08-18 select_top_projects 引入）
+        try:
+            cols = [r[1] for r in cursor.execute("PRAGMA table_info(projects)").fetchall()]
+            if "tags" not in cols:
+                cursor.execute("ALTER TABLE projects ADD COLUMN tags TEXT DEFAULT ''")
+        except Exception:
+            pass
 
         # 迁移：为已有的 resume_records 表补充新字段
         try:

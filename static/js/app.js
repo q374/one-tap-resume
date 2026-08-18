@@ -1,4 +1,4 @@
-const { createApp, ref, reactive, computed, onMounted, nextTick } = Vue;
+const { createApp, ref, reactive, computed, onMounted, nextTick, watch } = Vue;
 
 createApp({
     setup() {
@@ -471,6 +471,80 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
             return reasons;
         }
 
+        // ======== 关键词覆盖率预览（生成前） ========
+        const matchPreview = ref(null);
+        const matchPreviewLoading = ref(false);
+        let matchPreviewTimer = null;
+
+        const matchPreviewScore = computed(() => {
+            const p = matchPreview.value;
+            if (!p) return null;
+            return p.fillable_score != null ? p.fillable_score : p.score;
+        });
+        const matchPreviewHitText = computed(() => {
+            const p = matchPreview.value;
+            if (!p) return '';
+            const hit = (p.matched || []).length;
+            const total = p.total - (p.unfillable_n || 0);
+            return hit + '/' + Math.max(total, 0);
+        });
+        const matchPreviewCardClass = computed(() => {
+            const s = matchPreviewScore.value;
+            if (s == null) return 'match-card-high';
+            if (s < 60) return 'match-card-low';
+            if (s < 70) return 'match-card-medium';
+            return 'match-card-high';
+        });
+        const matchPreviewLevelLabel = computed(() => {
+            const s = matchPreviewScore.value;
+            if (s == null) return '';
+            if (s >= 70) return '可补命中率达标 · 可生成';
+            if (s >= 60) return '可补命中率良好 · 建议微调';
+            return '可补命中率偏低 · 建议先补';
+        });
+        const matchPreviewLevelTag = computed(() => {
+            const s = matchPreviewScore.value;
+            if (s == null) return 'jd-tag-nice';
+            if (s < 60) return 'jd-tag-hard';
+            return 'jd-tag-nice';
+        });
+        const matchPreviewBarClass = computed(() => {
+            const s = matchPreviewScore.value;
+            if (s == null) return 'match-preview-bar-high';
+            if (s < 60) return 'match-preview-bar-low';
+            if (s < 70) return 'match-preview-bar-medium';
+            return 'match-preview-bar-high';
+        });
+        const matchPreviewBarWidth = computed(() => {
+            const s = matchPreviewScore.value;
+            return (s == null ? 0 : Math.max(2, s)) + '%';
+        });
+        const matchPreviewSuggestions = computed(() => {
+            const p = matchPreview.value;
+            if (!p || !p.suggestions) return [];
+            return p.suggestions.filter(s => s.type !== '专名' && s.type !== '行业属性');
+        });
+        const matchPreviewUnfillableText = computed(() => {
+            const p = matchPreview.value;
+            if (!p || !p.unfillable || !p.unfillable.length) return '';
+            return '另有 ' + p.unfillable.length + ' 个行业/公司属性词（' + p.unfillable.join('、') + '）不计入命中率，可忽略';
+        });
+
+        async function refreshMatchPreview() {
+            if (!jdText.value.trim()) { matchPreview.value = null; return; }
+            matchPreviewLoading.value = true;
+            try {
+                matchPreview.value = await API.post('/api/match/preview', { jd_text: jdText.value });
+            } catch(e) { /* 网络/接口异常静默，不打断用户 */ }
+            matchPreviewLoading.value = false;
+        }
+
+        // JD 变化自动检测（防抖 500ms），粘贴即出覆盖率
+        watch(jdText, () => {
+            if (matchPreviewTimer) clearTimeout(matchPreviewTimer);
+            matchPreviewTimer = setTimeout(() => { refreshMatchPreview(); }, 500);
+        });
+
         async function generateResume() {
             if (!jdText.value.trim()) { alert('请先粘贴目标岗位的JD'); return; }
             // 生成前内容量预检：偏少先弹窗解释，避免生成后才发现问题
@@ -483,14 +557,26 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
             } catch(e) {}
             generating.value = true;
             result.value = null;
-            // 生成前匹配度预览（零AI成本）：低匹配度先征询用户
-            let previewMatch = null;
-            try {
-                previewMatch = await API.post('/api/match/preview', { jd_text: jdText.value });
-            } catch(e) {}
-            if (previewMatch && previewMatch.level === 'low') {
+            // 生成前匹配度预览（零AI成本）：复用实时检测结果，低/中匹配度先征询用户
+            if (!matchPreview.value) {
+                await refreshMatchPreview();
+            }
+            const previewMatch = matchPreview.value;
+            const pvScore = previewMatch
+                ? (previewMatch.fillable_score != null ? previewMatch.fillable_score : previewMatch.score)
+                : null;
+            if (previewMatch && pvScore != null && pvScore < 70) {
                 const hit = previewMatch.matched ? previewMatch.matched.length : 0;
-                const ok = confirm('当前经历库与目标岗位匹配度较低（' + (previewMatch.score ?? '?') + ' 分，命中 ' + hit + '/' + previewMatch.total + '）。\n\nAI 将启用「匹配增强模式」：在不编造的前提下，按岗位视角重新提炼现有经历、补强技能区与自我评价，尽量贴近岗位要求。\n\n仍要继续生成吗？');
+                const fillTotal = (previewMatch.total || 0) - (previewMatch.unfillable_n || 0);
+                const miss = (previewMatch.suggestions && previewMatch.suggestions.length)
+                    ? previewMatch.suggestions.slice(0, 8).map(s => '· ' + s.keyword + '：' + s.suggestion).join('\n')
+                    : ((previewMatch.missing_keywords || []).join('、') || '（未能识别关键词）');
+                const ok = confirm(
+                    '当前经历库可补关键词命中 ' + hit + '/' + Math.max(fillTotal, 0) + '（可补命中率 ' + pvScore + ' 分，低于 70% 达标线）。\n\n'
+                    + '以下关键词暂未覆盖：\n' + miss + '\n\n'
+                    + 'AI 将启用「匹配增强模式」：在不编造的前提下，按岗位视角重新提炼现有经历、补强技能区与自我评价。\n\n'
+                    + '建议先去「经历管理」把确实会用/做过的补上，命中率可到 70%+。\n\n仍要继续生成吗？'
+                );
                 if (!ok) { generating.value = false; return; }
             }
             try {
@@ -533,9 +619,11 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
 
         // 匹配度预警卡片
         const matchCardClass = computed(() => {
-            const lv = result.value && result.value.match_info ? result.value.match_info.level : '';
-            if (lv === 'low') return 'match-card-low';
-            if (lv === 'medium') return 'match-card-medium';
+            const m = result.value && result.value.match_info;
+            const s = m ? (m.fillable_score != null ? m.fillable_score : m.score) : null;
+            if (s == null) return 'match-card-high';
+            if (s < 60) return 'match-card-low';
+            if (s < 70) return 'match-card-medium';
             return 'match-card-high';
         });
         const matchCardTitle = computed(() => {
@@ -1539,6 +1627,11 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
             companyResult, companyLoading, analyzeCompany, quickAnalyzeCompany,
             rawCompanyData, dataInterpretation, interpreting, interpretData,
             generateResume, exportFile,
+            matchPreview, matchPreviewLoading, refreshMatchPreview,
+            matchPreviewScore, matchPreviewHitText,
+            matchPreviewCardClass, matchPreviewLevelLabel, matchPreviewLevelTag,
+            matchPreviewBarClass, matchPreviewBarWidth,
+            matchPreviewSuggestions, matchPreviewUnfillableText,
             compactLevel, fillMode, fillFactor, pageCount, pageOverflow,
             fitNotice, fitNoticeClass, autoFitToPage,
             matchCardClass, matchCardTitle,

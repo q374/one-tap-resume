@@ -254,6 +254,41 @@ ACM-ICPC亚洲区域赛 银奖 2022
                 </button>
             </div>
 
+            <!-- 关键词覆盖率预览（生成前，零AI成本） -->
+            <div v-if="matchPreview && matchPreview.level && matchPreview.level !== 'unknown'"
+                 class="card match-preview" :class="matchPreviewCardClass">
+                <div class="match-preview-head">
+                    <h3 style="margin:0">📊 关键词覆盖率<span v-if="matchPreviewLoading" class="match-preview-tag">更新中…</span></h3>
+                    <div class="match-score-row" style="margin:4px 0 0">
+                        <span class="match-score">{{ matchPreviewScore }}<em>分</em></span>
+                        <span class="match-detail">可补关键词命中 {{ matchPreviewHitText }}</span>
+                        <span class="jd-tag" :class="matchPreviewLevelTag">{{ matchPreviewLevelLabel }}</span>
+                    </div>
+                </div>
+                <div class="match-preview-bar">
+                    <div class="match-preview-bar-inner" :class="matchPreviewBarClass" :style="{width: matchPreviewBarWidth}"></div>
+                </div>
+                <p class="hint" style="margin:4px 0 0">达标参考：可补命中率 ≥70% 优 / 60-69% 良 / 低于60% 建议先补再生成。<span v-if="matchPreviewUnfillableText" style="color:#999">（{{ matchPreviewUnfillableText }}）</span></p>
+                <div v-if="matchPreviewSuggestions && matchPreviewSuggestions.length" class="match-missing" style="margin-top:8px">
+                    <div class="match-missing-label">岗位要求你暂未覆盖（可点「去经历管理补录」直接补）：</div>
+                    <ul class="match-suggestion-list">
+                        <li v-for="s in matchPreviewSuggestions" :key="s.keyword">
+                            <span class="jd-tag jd-tag-hard">{{ s.keyword }}</span>
+                            <span class="match-suggest-type">{{ s.type }}</span>
+                            <span class="match-suggest-text">{{ s.suggestion }}</span>
+                        </li>
+                    </ul>
+                </div>
+                <div v-else class="match-missing" style="margin-top:8px">
+                    <span class="match-missing-label" style="color:#16a34a">✅ 未发现可补缺失关键词，可以直接生成</span>
+                </div>
+                <div class="btn-group" style="margin-top:8px">
+                    <button v-if="matchPreview.missing_keywords && matchPreview.missing_keywords.length"
+                            @click="switchTab('experience')" class="btn btn-outline btn-sm">📝 去经历管理补录</button>
+                    <button @click="refreshMatchPreview" class="btn btn-outline btn-sm" :disabled="matchPreviewLoading || !jdText.trim()">🔄 重新检测</button>
+                </div>
+            </div>
+
             <!-- JD分析结果 -->
             <div v-if="jdAnalysis" class="jd-analysis" style="position:relative">
                 <button @click="jdAnalysis = null" class="close-btn" title="关闭">✕</button>
@@ -342,12 +377,22 @@ ACM-ICPC亚洲区域赛 银奖 2022
                  class="card" style="margin-bottom:12px" :class="matchCardClass">
                 <h3>{{ matchCardTitle }}</h3>
                 <div class="match-score-row">
-                    <span class="match-score">{{ result.match_info.score }}<em>分</em></span>
-                    <span class="match-detail">JD关键词命中 {{ result.match_info.matched.length }}/{{ result.match_info.total }}</span>
+                    <span class="match-score">{{ result.match_info.fillable_score ?? result.match_info.score }}<em>分</em></span>
+                    <span class="match-detail">可补关键词命中 {{ result.match_info.matched.length }}/{{ (result.match_info.total || 0) - (result.match_info.unfillable_n || 0) }}</span>
+                    <span v-if="result.match_info.unfillable_n" class="hint" style="margin:0">（另有 {{ result.match_info.unfillable_n }} 个行业/公司属性词不计入）</span>
                 </div>
                 <div v-if="result.match_info.missing_keywords && result.match_info.missing_keywords.length" class="match-missing">
                     <span class="match-missing-label">岗位要求你暂未覆盖：</span>
                     <span v-for="kw in result.match_info.missing_keywords" :key="kw" class="jd-tag jd-tag-hard">{{ kw }}</span>
+                </div>
+                <div v-if="result.match_info.suggestions && result.match_info.suggestions.length" class="match-missing" style="margin-top:6px">
+                    <ul class="match-suggestion-list">
+                        <li v-for="s in result.match_info.suggestions" :key="s.keyword">
+                            <span class="jd-tag jd-tag-hard">{{ s.keyword }}</span>
+                            <span class="match-suggest-type">{{ s.type }}</span>
+                            <span class="match-suggest-text">{{ s.suggestion }}</span>
+                        </li>
+                    </ul>
                 </div>
                 <p v-if="result.match_info.level === 'low' || result.match_info.level === 'medium'" class="hint" style="margin-top:6px">
                     ✨ 已自动启用「匹配增强模式」：AI 会按岗位视角重新提炼现有经历（<b>不编造</b>），并补强技能区 / 自我评价等模块。

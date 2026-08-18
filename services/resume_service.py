@@ -12,6 +12,58 @@ from config import BASE_DIR
 
 PHOTO_MARKER = '__PHOTO_BASE64__'
 
+# 行业特定职业资格证词库：与目标岗位方向无关时禁止写入简历
+OCCUPATIONAL_CERT_KEYWORDS = [
+    "海员", "四小证", "船员", "救生", "消防", "急救", "驾驶证", "驾照", "健康证",
+    "体检", "教师资格", "普通话", "导游", "会计", "证券", "基金", "银行从业",
+    "法律职业", "护士", "医师", "药师", "焊工", "电工", "叉车", "起重机",
+    "特种设备", "营养师", "厨师", "保安", "安检",
+]
+
+_OTHERS_SECTION_END_MARKS = ["教育背景", "实习经历", "项目经历", "获奖情况", "自我评价"]
+
+
+def _annotate_irrelevant_certs(experience_text: str, jd_text: str) -> str:
+    """把经历文本'其他信息'中与JD明显无关的职业资格证标注为『禁止写入简历』
+
+    保留：与JD相关的、作品/经历类（参赛/开源/调研/PRD等）、语言等级（CET等）。
+    标注：命中行业特定职业资格证词库 且 JD 未提及 → 追加『（与目标岗位无关，禁止写入简历）』。
+    """
+    if "其他信息" not in experience_text:
+        return experience_text
+    jd = jd_text or ""
+    lines = experience_text.split("\n")
+    in_others = False
+    out = []
+    for line in lines:
+        stripped = line.strip()
+        if "其他信息" in line:
+            in_others = True
+            out.append(line)
+            continue
+        if in_others:
+            if not stripped:
+                out.append(line)
+                continue
+            if any(k in line for k in _OTHERS_SECTION_END_MARKS):
+                in_others = False
+                out.append(line)
+                continue
+            title = line.split("：")[0].split(":")[0].strip()
+            if not title:
+                out.append(line)
+                continue
+            occ_words = [k for k in OCCUPATIONAL_CERT_KEYWORDS if k in title]
+            if occ_words:
+                # JD 是否提及这些资格词或其行业词
+                jd_mentions = any(w in jd for w in occ_words)
+                if not jd_mentions:
+                    out.append(line + "（与目标岗位无关，禁止写入简历）")
+                    continue
+        out.append(line)
+    return "\n".join(out)
+
+
 
 class ResumeService:
     async def generate(self, template_html: str, experience_text: str,
@@ -20,6 +72,8 @@ class ResumeService:
         """生成简历 HTML，返回 {html, valid, issues, industry}"""
         # 清除经历文本中的 Markdown 残留（** 等），防止污染输出
         experience_text = strip_markdown(experience_text)
+        # 硬过滤：与JD无关的职业资格证（海员证/四小证/体检等）标注为禁止写入
+        experience_text = _annotate_irrelevant_certs(experience_text, jd_text)
 
         # 行业侧重点分析（降级铁律：失败不影响简历生成）
         industry_ctx = ""

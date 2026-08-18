@@ -626,11 +626,44 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
             if (s < 70) return 'match-card-medium';
             return 'match-card-high';
         });
+        const matchCardVerdict = computed(() => {
+            const m = result.value && result.value.match_info;
+            if (!m) return '';
+            const s = m.fillable_score != null ? m.fillable_score : m.score;
+            if (s == null) return '';
+            const miss = (m.fillable_missing || []).slice(0, 4).join('、');
+            if (s >= 70) return '✅ 预计能过 AI 初筛（可补关键词覆盖达标）';
+            if (s >= 60) return '⚠️ 压线，建议补：' + (miss || '缺失词') + ' 再生成更稳';
+            return '❌ 大概率被初筛卡掉，建议先补：' + (miss || '缺失词');
+        });
+        const matchCardVerdictClass = computed(() => {
+            const m = result.value && result.value.match_info;
+            const s = m ? (m.fillable_score != null ? m.fillable_score : m.score) : null;
+            if (s == null) return '';
+            if (s >= 70) return 'verdict-ok';
+            if (s >= 60) return 'verdict-warn';
+            return 'verdict-bad';
+        });
+
+        const resultMatchSuggestions = computed(() => {
+            const m = result.value && result.value.match_info;
+            if (!m || !m.suggestions) return [];
+            return m.suggestions.filter(s => s.type !== '专名' && s.type !== '行业属性' && s.type !== '上下文');
+        });
+        const resultMatchUnfillableText = computed(() => {
+            const m = result.value && result.value.match_info;
+            if (!m || !m.unfillable || !m.unfillable.length) return '';
+            return '另有 ' + m.unfillable.length + ' 个行业/公司/上下文词（' + m.unfillable.join('、') + '）不计入命中率，可忽略';
+        });
+
         const matchCardTitle = computed(() => {
-            const lv = result.value && result.value.match_info ? result.value.match_info.level : '';
-            if (lv === 'low') return '⚠️ 匹配度偏低 — 已启用增强模式';
-            if (lv === 'medium') return '⚡ 匹配度一般 — 已启用增强模式';
-            return '✅ 匹配度良好';
+            const m = result.value && result.value.match_info;
+            if (!m) return '';
+            const s = m.fillable_score != null ? m.fillable_score : m.score;
+            if (s == null) return '';
+            if (s >= 70) return '✅ 匹配度良好 — 可补关键词已覆盖';
+            if (s >= 60) return '⚡ 匹配度一般 — 已启用增强模式';
+            return '⚠️ 匹配度偏低 — 已启用增强模式';
         });
 
         // 压缩/填充用的覆盖样式：CSS 变量 + calc，保证层级差（h1=正文+14 / h2=+4 / 条目标题=+2 / 辅助=-2）
@@ -1634,7 +1667,8 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
             matchPreviewSuggestions, matchPreviewUnfillableText,
             compactLevel, fillMode, fillFactor, pageCount, pageOverflow,
             fitNotice, fitNoticeClass, autoFitToPage,
-            matchCardClass, matchCardTitle,
+            matchCardClass, matchCardTitle, matchCardVerdict, matchCardVerdictClass,
+            resultMatchSuggestions, resultMatchUnfillableText,
             reviseInstruction, revising, hasRevision, reviseError,
             sendRevise, acceptRevision, rejectRevision,
             coverLetter, genCoverLoading, genCoverLetter,

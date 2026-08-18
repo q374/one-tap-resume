@@ -149,19 +149,41 @@ def compute_match(experience_text: str, jd_text: str) -> dict:
 
 
 def build_match_context(match: dict) -> str:
-    """低/中匹配时生成「匹配增强模式」上下文，注入生成 prompt；高匹配返回空串"""
-    if not match or match.get("level") not in ("low", "medium"):
+    """可补命中率<70 时生成「过初筛强化模式」上下文，注入生成 prompt：
+    把缺失的可补关键词作为硬性覆盖清单，让 AI 在不编造前提下尽力覆盖，目标是通过 AI 初筛。"""
+    if not match:
         return ""
-    level_cn = "偏低" if match.get("level") == "low" else "一般"
-    score = match.get("score", 0)
+    fs = match.get("fillable_score")
+    if fs is None:
+        if match.get("level") not in ("low", "medium"):
+            return ""
+        fs = match.get("score", 0)
+    if fs is None or fs >= 70:
+        return ""
+    level_cn = "偏低" if fs < 60 else "一般"
     detail = match.get("detail", "")
-    missing = "、".join(match.get("missing_keywords", [])[:8]) or "无"
+    fillable = match.get("fillable_missing") or match.get("missing_keywords", [])
+    missing = "、".join(fillable[:8]) or "无"
+
+    suggestions = match.get("suggestions") or []
+    skill_miss = [s["keyword"] for s in suggestions if s.get("type") == "技能" and s["keyword"] in fillable]
+    exp_miss = [s["keyword"] for s in suggestions if s.get("type") == "经历" and s["keyword"] in fillable]
+    other_miss = [k for k in fillable if k not in skill_miss and k not in exp_miss]
+
+    lines = []
+    if skill_miss:
+        lines.append(f"以下技能关键词必须尽力覆盖到「专业技能」区（仅当确实会用/做过，不编造）：{'、'.join(skill_miss[:6])}")
+    if exp_miss:
+        lines.append(f"以下经历关键词必须在项目/实习描述中体现相关动作（真实做过才写）：{'、'.join(exp_miss[:6])}")
+    if other_miss:
+        lines.append(f"其余关键词（{'、'.join(other_miss[:4])}）可在技能区或自我评价中顺带提及（可选）。")
+    coverage = "\n".join(lines) if lines else f"JD 中以下要求你的经历库未直接覆盖：{missing}。"
+
     return (
-        f"【经历-岗位匹配度{level_cn}（JD关键词命中 {score} 分 / {detail}），启用匹配增强模式】\n"
-        "你的任务是在不编造的前提下，尽量提高简历与目标岗位的相关度：\n"
+        f"【经历-岗位可补命中率 {fs} 分（{detail}），低于 70% 达标线，启用「过初筛强化模式」】\n"
+        "目标：让简历能通过目标岗位的 AI 初筛（关键词机筛）。核心动作是提高 JD 可补关键词的覆盖，同时严守不编造。\n"
         "1. 【可迁移改写】把现有经历按目标岗位视角重新提炼表述：事实不变，突出与JD要求相关的可迁移能力（如运营经历投数据岗→突出数据分析、用户洞察、活动复盘；销售经历投产品岗→突出用户需求挖掘、方案落地）。禁止虚构经历或数据。\n"
-        "2. 【补位模块】当项目/工作经历不足时，充分利用：技能区按JD要求拆分并标注使用场景、自我评价强化可迁移优势+学习能力+求职动机、获奖/证书/课程项目全部拉入正文。\n"
+        "2. 【覆盖缺失词】\n" + coverage + "\n"
         "3. 【如实原则】JD中完全没做过的内容（如从未做过AB测试）不得写成「做过」，只能从现有经历提炼可迁移表述。\n"
         "4. 【一页兜底】内容不足时通过合理排版与补位模块让简历接近一页，禁止空洞重复或注水。\n"
-        f"JD中以下要求你的经历库未直接覆盖：{missing}。"
     )

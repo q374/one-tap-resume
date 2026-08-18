@@ -359,3 +359,9 @@ small { color: #98a1b0; }
 .match-suggestion-list li { display: flex; align-items: baseline; gap: 6px; font-size: 13px; padding: 3px 0; border-bottom: 1px dashed #eee; flex-wrap: wrap; }
 .match-suggest-type { font-size: 11px; color: #666; background: #f0f0f0; border-radius: 4px; padding: 0 5px; flex: none; }
 .match-suggest-text { color: #555; flex: 1; min-width: 200px; }
+
+/* AI 初筛预判（2026-08-18） */
+.match-verdict { margin: 4px 0 0; padding: 6px 10px; border-radius: 6px; font-size: 13px; font-weight: 600; }
+.verdict-ok { background: #f0faf0; color: #166534; border: 1px solid #bbf7d0; }
+.verdict-warn { background: #fffaf0; color: #92400e; border: 1px solid #fde68a; }
+.verdict-bad { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }

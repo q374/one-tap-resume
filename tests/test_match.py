@@ -55,7 +55,7 @@ def test_match_context_low_is_not_empty():
     ctx = build_match_context(r)
     assert "可迁移" in ctx
     assert "不编造" in ctx or "如实" in ctx
-    assert "未直接覆盖" in ctx
+    assert "覆盖缺失词" in ctx or "未直接覆盖" in ctx
 
 
 def test_match_missing_keywords_limited():

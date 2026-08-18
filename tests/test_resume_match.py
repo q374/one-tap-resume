@@ -35,7 +35,7 @@ def test_low_match_returns_info_and_injects_context():
     assert result["match_info"]["level"] == "low"
     assert result["match_info"]["missing_keywords"]
     prompt = m_ai.call_args[0][0]
-    assert "匹配增强模式" in prompt
+    assert "过初筛强化模式" in prompt
     assert "可迁移改写" in prompt
 
 
@@ -44,4 +44,4 @@ def test_high_match_no_enhancement():
     assert result["match_info"]["level"] in ("high", "medium")
     prompt = m_ai.call_args[0][0]
     # 高匹配不应注入增强指令
-    assert "匹配增强模式" not in prompt or "（匹配度正常" in prompt
+    assert "过初筛强化模式" not in prompt

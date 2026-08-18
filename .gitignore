@@ -11,4 +11,5 @@ server.err.log
 
 # backup & verify artifacts
 *.bak_*
+*.bak-*
 tests/_verify*.html

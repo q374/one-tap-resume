@@ -208,7 +208,7 @@ class ExperienceService:
                 conn.execute(f"UPDATE {table_name} SET sort_order=? WHERE id=?", (i, item_id))
 
     # === Export all for prompt ===
-    def export_all(self) -> dict:
+    def export_all(self, project_ids: list = None) -> dict:
         """导出所有经历为组织好的文本，用于嵌入 prompt"""
         info = self.get_basic_info()
 
@@ -239,6 +239,9 @@ class ExperienceService:
                 sections.append(f"{i}. {intern.company}，{intern.position}，{intern.start_date}-{intern.end_date}：{intern.description}")
 
         proj_list = self.list_projects()
+        if project_ids is not None:
+            _pid_set = set(project_ids)
+            proj_list = [p for p in proj_list if p.id in _pid_set]
         if proj_list:
             sections.append("\n项目经历：")
             for i, proj in enumerate(proj_list, 1):
@@ -275,6 +278,52 @@ class ExperienceService:
             "photo_path": info.photo_path,
         }
 
+
+
+    def select_top_projects(self, jd_text: str, top_n: int = 2) -> list:
+        """按 JD 匹配度精选项目（通用逻辑，不硬编码任何特定项目）
+
+        优先用项目的【能力画像 tags】匹配 JD 关键词（精准）；
+        项目没填 tags 时降级用 名称+技术栈+动作 全文匹配。
+        打分：中文/英文 tag 在 JD 中出现 +3；英文 tag 与 JD 英文词互相包含 +2；
+        技术栈命中 JD 英文工具词 +1。返回得分降序，项目数 <= top_n 全量返回。
+        """
+        projects = self.list_projects()
+        if len(projects) <= top_n:
+            return projects
+        jd_lower = (jd_text or "").lower()
+        en_kw = {w for w in re.findall(r"[a-zA-Z][a-zA-Z0-9+#.]{1,24}", jd_lower) if len(w) >= 2}
+        has_tags = any((p.tags or "").strip() for p in projects)
+        scored = []
+        for p in projects:
+            if has_tags:
+                score = self._score_project_by_tags(p, jd_lower, en_kw)
+            else:
+                text = " ".join([p.name or "", p.actions or "",
+                                 p.tech_stack or ""]).lower()
+                score = sum(1 for w in en_kw if w in text)
+            scored.append((score, p.id, p))
+        scored.sort(key=lambda x: (-x[0], x[1]))
+        return [p for _, _, p in scored[:top_n]]
+
+    @staticmethod
+    def _score_project_by_tags(project, jd_lower: str, en_kw: set) -> int:
+        """基于项目能力画像 tags 与 JD 的匹配打分"""
+        tags = [t.strip().lower() for t in (project.tags or "").split(",") if t.strip()]
+        score = 0
+        for tag in tags:
+            if tag in jd_lower:
+                score += 3
+            else:
+                for w in en_kw:
+                    if tag in w or w in tag:
+                        score += 2
+                        break
+        tech = (project.tech_stack or "").lower()
+        for w in en_kw:
+            if w in tech:
+                score += 1
+        return score
 
 experience_service = ExperienceService()
 

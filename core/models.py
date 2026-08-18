@@ -73,6 +73,7 @@ class Project:
     actions: str = ""
     results: str = ""
     tech_stack: str = ""
+    tags: str = ""
     sort_order: int = 0
 
     def to_dict(self):

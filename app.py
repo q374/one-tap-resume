@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="AI简历定制工具", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="AI简历定制工具", version="2.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -551,7 +551,14 @@ async def match_preview(req: MatchPreviewRequest):
 async def generate_resume(req: GenerateRequest):
     """MVP核心接口 — 根据经历库和JD生成简历HTML"""
     # 1. 获取经历和模板
-    exp_data = experience_service.export_all()
+    # 项目级匹配：按 JD 精选最相关的 top_n 个项目（通用逻辑，失败降级为全量）
+    selected_ids = None
+    try:
+        selected_projects = experience_service.select_top_projects(req.jd_text, top_n=2)
+        selected_ids = [p.id for p in selected_projects]
+    except Exception:
+        selected_ids = None
+    exp_data = experience_service.export_all(project_ids=selected_ids)
     experience_text = exp_data["text"]
     photo_path = exp_data.get("photo_path", "")
 
@@ -586,6 +593,10 @@ async def generate_resume(req: GenerateRequest):
         "resume_issues": resume_result.get("issues", []),
         "industry": resume_result.get("industry", ""),
         "match_info": resume_result.get("match_info", {}),
+        "selected_projects": [
+            {"id": p.id, "name": p.name, "score_tags": (p.tags or "")}
+            for p in selected_projects
+        ] if selected_projects else [],
     }
 
 # ==================== 简历质量诊断 ====================

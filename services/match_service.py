@@ -14,6 +14,14 @@ import re
 from prompts.skill_aliases import extract_jd_keywords, expand_keyword, alias_hit
 
 
+# JD 上下文词：协作对象/流程动作（如"与研发部门沟通""上线后培训"），不是能力要求，无需专门补录
+_GENERIC_CONTEXT_KEYWORDS = {
+    "培训", "研发", "设计", "测试", "业务", "运营", "市场", "销售", "客服",
+    "财务", "人事", "行政", "生产", "制造", "验收", "推广", "投放", "客户",
+    "沟通", "协作", "支持", "对接", "配合",
+}
+
+
 # 行业/赛道属性词：无法通过"补录经历"命中，不计入可补命中率（避免用户对着无法补的词干瞪眼）
 _INDUSTRY_ATTR_KEYWORDS = {
     "saas", "b2b", "b2c", "o2o", "互联网", "云计算", "大数据", "人工智能",
@@ -31,6 +39,8 @@ def _is_unfillable(kw: str) -> bool:
         return False
     if k.isascii() and re.fullmatch(r"[a-z0-9+#.]{2,}", k):
         return True  # 英文但非技能/经历词 → 多为公司/产品专名或无关词，不可补
+    if k in _GENERIC_CONTEXT_KEYWORDS:
+        return True  # JD 上下文词（协作对象/流程动作），不是能力要求
     return k in _INDUSTRY_ATTR_KEYWORDS
 
 # 技能类补充词：不在 SKILL_ALIAS_CLUSTERS 里的硬技能/工具（供"怎么补"建议分类用）
@@ -56,6 +66,11 @@ def _suggest_for_keyword(kw: str) -> dict:
     """给单个缺失关键词生成"怎么补"建议：技能类补技能区、经历类补经历、其余通用"""
     k = kw.lower()
     if _is_unfillable(kw):
+        if k in _GENERIC_CONTEXT_KEYWORDS:
+            return {
+                "keyword": kw, "type": "上下文",
+                "suggestion": "这是 JD 里的协作对象/流程动作（如\"与研发部门沟通\"），不是硬性能力要求，无需专门补录",
+            }
         if k in _INDUSTRY_ATTR_KEYWORDS:
             return {
                 "keyword": kw, "type": "行业属性",

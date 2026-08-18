@@ -522,12 +522,12 @@ const extraTabs = tabs.filter(t => t.group === 'extra');
         const matchPreviewSuggestions = computed(() => {
             const p = matchPreview.value;
             if (!p || !p.suggestions) return [];
-            return p.suggestions.filter(s => s.type !== '专名' && s.type !== '行业属性');
+            return p.suggestions.filter(s => s.type !== '专名' && s.type !== '行业属性' && s.type !== '上下文');
         });
         const matchPreviewUnfillableText = computed(() => {
             const p = matchPreview.value;
             if (!p || !p.unfillable || !p.unfillable.length) return '';
-            return '另有 ' + p.unfillable.length + ' 个行业/公司属性词（' + p.unfillable.join('、') + '）不计入命中率，可忽略';
+            return '另有 ' + p.unfillable.length + ' 个行业/公司/上下文词（' + p.unfillable.join('、') + '）不计入命中率，可忽略';
         });
 
         async function refreshMatchPreview() {

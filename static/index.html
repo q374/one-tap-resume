@@ -379,7 +379,7 @@ ACM-ICPC亚洲区域赛 银奖 2022
                 <div class="match-score-row">
                     <span class="match-score">{{ result.match_info.fillable_score ?? result.match_info.score }}<em>分</em></span>
                     <span class="match-detail">可补关键词命中 {{ result.match_info.matched.length }}/{{ (result.match_info.total || 0) - (result.match_info.unfillable_n || 0) }}</span>
-                    <span v-if="result.match_info.unfillable_n" class="hint" style="margin:0">（另有 {{ result.match_info.unfillable_n }} 个行业/公司属性词不计入）</span>
+                    <span v-if="result.match_info.unfillable_n" class="hint" style="margin:0">（另有 {{ result.match_info.unfillable_n }} 个行业/公司/上下文词不计入）</span>
                 </div>
                 <div v-if="result.match_info.missing_keywords && result.match_info.missing_keywords.length" class="match-missing">
                     <span class="match-missing-label">岗位要求你暂未覆盖：</span>

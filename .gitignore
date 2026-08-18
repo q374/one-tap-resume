@@ -8,3 +8,7 @@ venv/
 # dev server logs
 server.out.log
 server.err.log
+
+# backup & verify artifacts
+*.bak_*
+tests/_verify*.html

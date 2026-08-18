@@ -192,11 +192,17 @@ class ReviseService:
 - 删除旧文字：用 <del class="ai-change">旧文字</del> 包裹
 - 新增文字：用 <ins class="ai-change">新文字</ins> 包裹
 - 替换文字：<del class="ai-change">旧</del><ins class="ai-change">新</ins> 紧挨
+- **修改已有文字必须成对（del+ins）**：一段已有文字需要改动时，必须先用 <del> 标出被替换的旧文字，再紧跟 <ins> 新文字。**禁止只加 <ins> 而不删旧文字**——那会让同一句话出现两遍造成重复。只有原文完全没有的全新句子才允许单独使用 <ins>。
+- **输出前全文自检**：任何一句话在全文中只允许出现一次；若发现内容重复，说明漏了 <del>，补上后再输出。
 - del/ins 标签必须放在现有HTML标签的内部，不能破坏标签嵌套
 - 禁止使用 mark 标签，只能用 del 和 ins
 
 【关键约束】
-- 只改指令要求的内容，其他部分原封不动
+- **事实数据保护（最高优先级）**：学校名称、专业、学位、起止时间、公司名称、职位、证书名称、量化数字等事实性信息，在**用户指令未点名的模块**中一律禁止改动、删除、增补。
+- **指令点名区域可自由修改**：用户指令明确要求修改的区域（如"自我评价不要提专业"），可以自由增删改该区域内的任何文字——包括删除其中引用的专业、学校等表述（那只是表达引用，不是被保护的事实记录本身）。
+- 禁止因为修改某区域而连带改动其他未点名模块中的事实记录（如改自我评价时，禁止动教育背景里的专业/时间）。
+- **修改范围**：指令指向具体模块（如"自我评价""技能区"）→ 只在该模块内修改，其他模块保持原样；指令是整体性要求（如"优化全文""让简历更专业"）→ 可在全篇润色表达，但仍受事实数据保护约束。
+- 允许的修改：措辞表达、句子结构、增删说明性文字（在不改变事实的前提下）
 - 保持原文的语言风格和口吻
 - 如果指令要求缩短/精简，结果必须明显变短
 - 禁止修改任何 style 或 CSS 相关内容
@@ -231,8 +237,28 @@ class ReviseService:
 
         # Step 6: 验证结构
         is_valid, issues = _validate_structure(current_html, html_content)
-        if not issues:
-            pass  # 结构完全正常
+        fatal_issues = [i for i in issues if ("关键标签" in i) or ("数量异常" in i)]
+        if fatal_issues:
+            # 结构损坏（AI 可能只返回了局部片段）：用更强提示重试 1 次
+            html_content = None
+            for _attempt in range(2):
+                try:
+                    html_content = await call_deepseek(
+                        prompt + '\n\n【再次强调，违反即失败】你刚才的输出结构不完整（可能只输出了局部片段）。必须输出修改后的【完整HTML】：包含 <html>、<head>（含原有 <style> 与占位符注释）、<body> 全部结构，从 <!DOCTYPE html> 或 <html> 开始，不允许只输出某个模块片段。',
+                        max_tokens=16384)
+                except Exception as e:
+                    return None, f"API调用失败: {str(e)}"
+                if not html_content:
+                    return None, "API返回空内容"
+                html_content = clean_html_response(html_content)
+                _is2, _iss2 = _validate_structure(current_html, html_content)
+                if not [i for i in _iss2 if ("关键标签" in i) or ("数量异常" in i)]:
+                    html_content = _restore_css(html_content, css_blocks)
+                    html_content = _restore_base64_images(html_content, images)
+                    is_valid, issues = _is2, _iss2
+                    break
+            else:
+                return None, "AI修改结果结构不完整（疑似只返回局部片段），本次修改已放弃，请重试"
 
         # Step 7: 注入diff CSS
         html_content = html_content.replace('</head>', DIFF_CSS + '</head>', 1)
